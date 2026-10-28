@@ -31,7 +31,7 @@ This extension has no account, no server of its own and no telemetry.
 | 1 | Version 1 scope | The core of the original, plus work Canvas hides |
 | 2 | Where done marks and custom tasks live | In Canvas, as planner overrides and planner notes |
 | 3 | What counts as a task | All work the student must do; no calendar events or announcements |
-| 4 | Where the list appears | A browser side panel, plus the Canvas dashboard sidebar where it exists |
+| 4 | Where the list appears | In the Canvas page where the To Do list was; an optional side panel for other pages |
 | 5 | Site access and onboarding | Required access to instructure.com, optional access to one custom domain, and a guided first run |
 | 6 | List layout and item placement | Items are placed by date and done state only, each in one group |
 | 7 | Item status | One set of status chips, the same on every item in every view |
@@ -45,8 +45,8 @@ This extension has no account, no server of its own and no telemetry.
 | 15 | Publishing and privacy | Three stores, one privacy policy, no data collection |
 | 16 | License | GPL-3.0-only, with DCO sign-off for contributions |
 | 17 | Name | Weekrow for Canvas |
-| 18 | Settings | Four settings |
-| 19 | Accessibility, language and theme | WCAG 2.2 AA, English text, theme follows the page or system |
+| 18 | Settings | Five settings, also shown inside the panel and the in-page list |
+| 19 | Accessibility, language and theme | WCAG 2.2 AA, English text, a Theme setting with Automatic, Light and Dark |
 | 20 | No-telemetry guarantee | One fetch wrapper that only reaches the student's Canvas |
 
 ## Decisions
@@ -164,16 +164,20 @@ If the course lookup fails, the item uses the course or group name that the plan
 
 - A. A browser side panel only.
 - B. Inside the Canvas dashboard sidebar only, like the original.
-- C. Both, with one shared UI.
+- C. Both, with one shared UI, and the side panel as the main surface.
+- D. Both, with one shared UI, and the Canvas page as the main home.
 
-**Decision:** C.
+**Decision:** D.
+The owner chose it after testing an early build: the panel took the spot that the list should have, and on Firefox it opened on the left.
 
-The side panel is the main surface on desktop.
-Chrome and Edge use `chrome.sidePanel`, and Firefox uses `sidebar_action`.
-The in-page list replaces the Canvas To Do list on the classic dashboard (Card View and Recent Activity) and on course home pages.
+The Canvas page is the main home.
+The in-page list replaces the Canvas To Do list on the classic dashboard (Card View and Recent Activity) and on course home pages, like the original Tasks for Canvas.
+It always shows there, also while the side panel is open.
 On a course home page, the in-page list shows only that course.
 The extension injects nothing on the new widget dashboard, in List View or on any page without the expected anchors.
-On those pages, the student uses the side panel.
+The side panel is an optional extra for those pages, and it opens only when the student clicks the toolbar button or presses the shortcut.
+It never opens by itself.
+Chrome and Edge use `chrome.sidePanel`, and Firefox uses `sidebar_action`.
 
 **Why:**
 
@@ -239,10 +243,6 @@ On those pages, the student uses the side panel.
 - On the home page of a course that the student hid (decision 18), show a one-line note with a link to the settings instead of the list.
 - Hide the native To Do list only after the first successful render.
   Show it again if the list ends in an error state.
-- While the side panel is open in a window, the in-page list in that window collapses to one line: "Shown in the side panel".
-  This avoids two copies of the same list.
-  The background tells the Canvas tabs in that window with `tabs.sendMessage`.
-  It finds those tabs with `tabs.query` on the saved address, which the host permission allows [24].
 - Each page layout has its own small adapter.
   An adapter that finds no anchor does nothing.
 - K-5 course home pages have no right column, so the adapter does nothing there [13].
@@ -300,13 +300,11 @@ On those pages, the student uses the side panel.
 
 **First run:**
 
-- On Chrome and Edge, a local welcome page opens on install.
-  The panel cannot open by itself [11].
-  The page shows how to pin the toolbar button and the keyboard shortcut.
+- In every browser, a local welcome page opens on install.
+  The page says that the list shows on the Canvas dashboard, and how to pin the toolbar button and use the keyboard shortcut for the side panel.
   It also has the address field and the "Allow access" button, because an extension page can call `permissions.request` [15].
-- On Firefox, the sidebar opens at install (`open_at_install` is true).
-  The same setting also lets Firefox reopen the sidebar at startup [12].
-  The sidebar shows the same first-run steps.
+- On Firefox, the sidebar does not open at install (`open_at_install` is false), because the side panel is optional (decision 4).
+  Firefox then also does not reopen the sidebar at startup [12], which matches that rule.
 
 **Finding the Canvas address:**
 
@@ -1131,7 +1129,7 @@ Septet for Canvas is the fallback.
 
 **Question:** Which settings does version 1 have?
 
-**Decision:** Four settings.
+**Decision:** Five settings.
 
 | Setting | Default |
 |---|---|
@@ -1139,6 +1137,11 @@ Septet for Canvas is the fallback.
 | Hidden courses | None, so all active student courses show |
 | Show progress rings | On |
 | Show Weekrow on Canvas pages | On |
+| Theme | Automatic (see decision 19) |
+
+- The settings show in three places with the same view: inside the side panel, inside the in-page list, and on the extension's own settings page.
+  The gear in the panel and in the in-page list opens the settings in place, and a Back button returns to the list.
+  The student never has to leave the page to change a setting.
 
 - "Hidden courses" is a list of the student's courses with a switch for each one, for example to hide a club or an orientation course.
   - When any course is hidden, the list ends with one quiet line, such as "1 course hidden", with a link to the settings.
@@ -1172,9 +1175,15 @@ Septet for Canvas is the fallback.
   Version 1 ships in English only.
 - Dates and weekday names also show in English, so that one view never mixes two languages.
   The Canvas language still sets the first day of the week and the 12-hour or 24-hour clock.
-- The side panel follows the system light or dark setting.
-- The in-page list follows the Canvas page.
-  It uses dark colors only when the page background is dark, as the original did [9].
+- A Theme setting has three choices: Automatic, Light and Dark.
+  - Light and Dark apply to every surface: the side panel, the settings and welcome pages, and the in-page list.
+  - Automatic uses the color scheme that the browser reports to extension pages (`prefers-color-scheme`).
+    On Firefox, extension pages follow Firefox's own theme, so the browser setting wins over the system [26].
+    On Chrome, extension pages follow the operating system, not Chrome's own Light or Dark mode, and Chrome has no extension API to read that mode [26].
+    Edge is treated like Chrome.
+    So on Chrome and Edge, a student whose browser mode differs from the system picks Light or Dark once.
+  - With Automatic, the in-page list follows the Canvas page, because it is part of that page.
+    It uses dark colors only when the page background is dark, as the original did [9].
 
 ### 20. No-telemetry guarantee
 
@@ -1255,3 +1264,4 @@ These items need a live check or an outside answer.
 23. Node.js 26.0.0 release notes. https://nodejs.org/en/blog/release/v26.0.0
 24. Chrome runtime and scripting API docs, the Chrome extension service worker lifecycle docs, and MDN runtime.sendMessage and scripting docs. https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle and https://developer.chrome.com/docs/extensions/reference/api/runtime#method-sendMessage and https://developer.chrome.com/docs/extensions/reference/api/scripting and https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/runtime/sendMessage
 25. Gradescope instructor guide on posting grades to Canvas, seen only as a search result summary because a direct fetch returned 403. https://guides.gradescope.com
+26. Browser color scheme behavior for extension pages: the W3C WebExtensions issue on preferred color schemes, the W3C CSS issue of December 2025 about Chrome's theme mode, and Mozilla's website appearance help page. https://github.com/w3c/webextensions/issues/242 and https://lists.w3.org/Archives/Public/public-css-archive/2025Dec/0569.html and https://support.mozilla.org/en-US/kb/change-website-appearance-settings-firefox
