@@ -1,0 +1,136 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test
+    # Pinned, because ubuntu-latest is moving to 26.04 (design decision 13).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js from .nvmrc
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Tests for the build checks
+        run: npm run test:scripts
+
+      - name: Build Chrome, Edge and Firefox, then check size, URLs and manifests
+        run: npm run check
+
+      - name: Lint the Firefox build with web-ext
+        run: npm run lint:webext
+
+      - name: Package all browsers and the Firefox source zip
+        run: npm run zip
+
+      - name: Upload the Firefox build and source zip
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: firefox-release
+          path: |
+            .output/firefox-mv3/
+            .output/*-sources.zip
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end tests in Chromium
+        run: npm run test:e2e
+
+      - name: Firefox smoke test
+        # The runner image ships Firefox and geckodriver; GECKOWEBDRIVER points to the driver folder.
+        run: |
+          export FIREFOX_BIN="$(command -v firefox)"
+          export GECKODRIVER_BIN="$GECKOWEBDRIVER/geckodriver"
+          npm run test:firefox
+
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  amo-reproducible-build:
+    name: Firefox Add-ons rebuild on ARM64
+    # Firefox Add-ons reviewers rebuild the source zip on Ubuntu 24.04 ARM64 with Node 24.14.0 and
+    # npm 11.9.0, and the result must match the uploaded build byte for byte (design decision 13).
+    needs: build-and-test
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - name: Set up Node.js 24.14.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.14.0
+
+      - name: Install npm 11.9.0
+        run: npm install --global npm@11.9.0
+
+      - name: Check the tool versions
+        run: |
+          test "$(node --version)" = "v24.14.0"
+          test "$(npm --version)" = "11.9.0"
+          echo "Node $(node --version), npm $(npm --version), $(uname -m)"
+
+      - name: Download the x64 Firefox build and source zip
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: firefox-release
+          path: x64
+
+      - name: Unpack the source zip
+        run: python3 -m zipfile -e x64/*-sources.zip source
+
+      - name: Install dependencies from the lockfile
+        working-directory: source
+        run: npm ci
+
+      - name: Build for Firefox Add-ons
+        working-directory: source
+        run: npm run build-for-amo
+
+      - name: Compare with the x64 build byte for byte
+        run: |
+          diff --recursive x64/firefox-mv3 source/.output/firefox-mv3
+          echo "The ARM64 rebuild matches the x64 build."

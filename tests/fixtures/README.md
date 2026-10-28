@@ -1,0 +1,131 @@
+# Test fixtures
+
+These fixtures give tests one realistic Canvas student and a set of fake Canvas pages.
+The JSON shapes follow the canvas-lms serializers at commit 1c9f0bb, with string ids.
+Nothing here reads the real clock or the network.
+
+## scenario.ts
+
+`buildScenario(now)` returns every Canvas response for one student, Jordan Rivera, with dates relative to `now`.
+Dates fall on local days in America/New_York, so "due tomorrow at 11:59 pm" stays true for any `now`.
+Fields that Canvas computes, such as `missing`, `late`, `locked_for_user` and `availability_status`, follow the Canvas rules at `now`.
+`SCENARIO` is the frozen scenario at `SCENARIO_NOW`, Tuesday 2026-10-27 at 2 pm EDT.
+Its current week runs from Sunday Oct 25 to Saturday Oct 31, and daylight saving time ends on Sunday Nov 1.
+`IDS` names every id by its meaning, for example `IDS.assignments.mathHomework5`.
+Call `buildScenario(now)` for a fresh copy that a test may change.
+
+## What the scenario covers
+
+- Six courses: biology, calculus, history (nickname and checkpoints), chemistry (no color), orientation (2023 term start) and a club that the student hides.
+- One course group in chemistry and one account group whose id is larger than 2^53.
+- Canvas uploads, classic graded quizzes, New Quizzes, Gradescope work, on-paper labs and no-submission columns.
+- A graded discussion, two checkpointed discussions as `sub_assignment` rows, ungraded discussions and pages with a to-do date.
+- Peer reviews of both kinds: `assessment_request` rows and a `peer_review_sub_assignment` row.
+- Custom tasks with and without a course, and calendar events and announcements that the extension drops.
+- An extension, a teacher status, a redo request after a done mark on Canvas and on Gradescope, and a teacher-set Missing on Gradescope.
+- A locked item, a locked missing item, a Gradescope item past its lock date and an excused item.
+- A skipped past-due item, a skipped undated item and a module "Mark as done" override with both flags true.
+- An item due at 00:00 on the first day of the next week, and an item before the orientation course's 16-week horizon.
+
+## plannerItemsInRange and the planner range
+
+`SCENARIO.plannerItems` holds every planner row from 400 days ago to the end of the fall term.
+`plannerItemsInRange(scenario, range)` answers one `GET /api/v1/planner/items` request, with both ends included.
+Older-style peer reviews match on the reviewer's own due date, which `plannerRangeDates` records, as Canvas does.
+
+## Assignment lists
+
+`SCENARIO.assignments` answers the assignment details request, `assignment_ids[]` with `include[]=submission`, when you filter it by id.
+`SCENARIO.undatedAssignments` answers the undated request, which also sends `include[]=checkpoints` and `exclude_checkpoints=true`.
+Every course is in one account that has discussion checkpoints turned on, so each undated assignment has `has_sub_assignments` and `checkpoints`.
+History's undated list still holds its two checkpoint parents, as a server that ignores `exclude_checkpoints` returns them.
+`allAssignmentsInCourse(scenario, courseId)` answers the planner-off request, `include[]=submission&include[]=checkpoints`, with the checkpoint fields on every assignment.
+
+## scenario.snapshot.json
+
+This file is `SCENARIO` as JSON, checked by `tests/unit/fixtures.test.ts`.
+It lets a reader see every exact value without running code.
+After a deliberate change to the scenario, run `npx vitest run tests/unit/fixtures.test.ts -u` to write it again.
+
+## wire-types.ts
+
+These types extend the shared contract types with every field that Canvas really sends.
+A fixture value of a wire type is assignable to the matching contract type.
+
+## canvas-json.ts
+
+These builders turn short specs into exact Canvas JSON.
+They copy the Canvas rules for `missing`, `late`, `graded`, html_url, lock info and override types.
+
+## time.ts
+
+These helpers compute local days and Canvas-style instants from one given `now`.
+
+## errors.ts
+
+`CANVAS_ERRORS` holds exact Canvas error responses: signed out, Limited Access, the 403 and 429 throttle, a duplicate override, 404 and 500.
+`invalidAssignmentIds(ids)` builds the 400 that Canvas sends when one id is not an assignment.
+`NOT_CANVAS_RESPONSES` holds answers from a site that is not Canvas, for the setup check.
+
+## pages.ts
+
+`FIXTURE_PAGES` lists each page with the URL to serve it at and what the in-page adapter must do there.
+`fixturePagePath(page)` gives the file path for a route handler.
+
+## pages/
+
+Each Canvas page has `#application.ic-app`, an inline script that sets `INST` and `ENV`, and Canvas's column layout.
+At 992 px and wider, the right column is 288 px wide with 240 px of content; below that it stacks under the content.
+Canvas fills parts of a page after load, so each page replays those steps from `template[data-fixture-step]` elements.
+Wait for `html[data-fixture-ready="true"]` before you assert, or add `?fixture_delay_ms=0` to the URL.
+The pages load no other files, and each page sets an empty favicon so the browser requests nothing.
+
+### dashboard-card-view.html
+
+The classic Card View dashboard at `/`, with `with-right-side` on the body.
+After load, `#right-side` gets the student To Do, Coming Up, Recent Feedback and View Grades.
+Canvas shows Coming Up next to the student To Do only for some roles and flags, and this page includes it so a test can check that it stays visible.
+
+### dashboard-recent-activity.html
+
+The Recent Activity dashboard at `/`, with the stream in `#dashboard-activity`.
+Its right side has the student To Do, Recent Feedback and View Grades, which is the real student layout.
+
+### dashboard-list-view.html
+
+The List View dashboard at `/`, with the planner and `#dashboard-planner-header`.
+The body has no `with-right-side`, `#right-side-wrapper` has `display: none` and `#right-side` is empty.
+The extension must inject nothing here.
+
+### dashboard-widgets.html
+
+The widget dashboard at `/`, which renders into `#content` with `data-testid="widget-columns"`.
+The body has no `with-right-side` and `#right-side` is empty.
+The extension must inject nothing here.
+
+### dashboard-mixed-role.html
+
+The dashboard at `/` for a student who is also a TA.
+Its right side has the legacy teacher To Do (`h2.todo-list-header` and `ul.to-do-list`), Coming Up and Recent Feedback, and no `.Sidebar__TodoListContainer`.
+The list mounts above the teacher To Do, which stays visible.
+
+### course-home.html
+
+The biology course home at `/courses/101`, with the course navigation open.
+Its right side has the course buttons, the course To Do in `.todo-list.Sidebar__TodoListContainer` and Recent Feedback.
+
+### course-home-hidden-course.html
+
+The home page of the club course at `/courses/106`, which the scenario student hides.
+The list shows a one-line note with a settings link here instead of the list.
+
+### course-home-k5.html
+
+A K-5 subject course home at `/courses/107`, which is not in the scenario.
+It has no right column, so the extension must inject nothing here.
+
+### not-canvas.html
+
+A university news page to serve at `https://news.northfield.edu/`.
+It has `with-right-side` on the body and a `#right-side` with a `.todo-list-header`, but no `#application.ic-app` and no `ENV`.
+Canvas detection must not accept it.

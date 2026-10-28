@@ -1,0 +1,37 @@
+{
+  "description": "Reviewed URL strings that may appear in the built extension. Every entry must be inert: it must never be the target of a network request. scripts/check-urls.mjs fails on any other http, https, ws or wss URL in the build. Matching is exact.",
+  "urls": [
+    {
+      "url": "http://www.w3.org/2000/svg",
+      "reason": "SVG namespace URI. Preact uses it to create SVG elements."
+    },
+    {
+      "url": "http://www.w3.org/1999/xhtml",
+      "reason": "XHTML namespace URI. Preact uses it to leave SVG and MathML parents."
+    },
+    {
+      "url": "http://www.w3.org/1998/Math/MathML",
+      "reason": "MathML namespace URI. Preact uses it to create MathML elements."
+    },
+    {
+      "url": "https://*.instructure.com/*",
+      "reason": "Match pattern of the required host permission and the static content script (decision 5)."
+    },
+    {
+      "url": "https://*/*",
+      "reason": "Match pattern of the optional host permission (decision 5)."
+    },
+    {
+      "url": "https://",
+      "reason": "Scheme prefix that turns a typed Canvas address into an origin (decision 5)."
+    },
+    {
+      "url": "https://github.com/tranbao0/Simple-CanvasTasks",
+      "reason": "Project repository link."
+    },
+    {
+      "url": "https://tranbao0.github.io/Simple-CanvasTasks/privacy",
+      "reason": "Privacy policy link (decision 15)."
+    }
+  ]
+}

@@ -1,0 +1,1257 @@
+# Design
+
+This document records the design decisions for version 1 of the extension.
+The extension is called Weekrow for Canvas (see decision 17).
+The repository still uses the working name Simple-CanvasTasks.
+Facts were checked on 2026-10-27.
+Each fact has a source in the [Sources](#sources) list at the end, shown as a number in brackets.
+"Inferred from source" means the fact comes from reading code, not from a live test.
+
+## Goal
+
+The extension shows a student's Canvas coursework for the week as a simple to-do list with progress rings.
+It replaces the original Tasks for Canvas sidebar.
+On Canvas, that extension now shows only a banner that sends users to BetterCampus [1].
+Its listing description says it collects no data, but the current build sends PostHog events and passes synced settings to BetterCampus through a hidden iframe [1].
+This extension has no account, no server of its own and no telemetry.
+
+## Why Canvas alone is not enough
+
+- The new Canvas dashboard is opt-in for each student on the web, and students who do not opt in keep the classic dashboard [3] [4].
+- The new dashboard's Course work widget lists only assignment submissions, and its default view hides work with no due date [5] [6].
+- The web dashboard has no week view, and the To-do list widget is not in the default layout [5] [6].
+- Canvas does not automatically mark external tool work, other than New Quizzes, as missing [7] [10].
+  After its due date, such work drops out of the Course work widget and out of the missing list.
+- The 2027 Canvas UI changes only how Canvas looks, so it fixes none of these gaps [8].
+
+## Decision log
+
+| # | Topic | Decision |
+|---|---|---|
+| 1 | Version 1 scope | The core of the original, plus work Canvas hides |
+| 2 | Where done marks and custom tasks live | In Canvas, as planner overrides and planner notes |
+| 3 | What counts as a task | All work the student must do; no calendar events or announcements |
+| 4 | Where the list appears | A browser side panel, plus the Canvas dashboard sidebar where it exists |
+| 5 | Site access and onboarding | Required access to instructure.com, optional access to one custom domain, and a guided first run |
+| 6 | List layout and item placement | Items are placed by date and done state only, each in one group |
+| 7 | Item status | One set of status chips, the same on every item in every view |
+| 8 | What counts as done, and the rings | The Canvas planner rule, plus excused and graded work; rings count items |
+| 9 | Week, time zone and past-due work | A calendar week in the Canvas time zone, a Past due group back to the term start (at most 16 weeks), and a look-ahead for tomorrow |
+| 10 | Custom tasks | Create, edit and delete Canvas planner notes |
+| 11 | Data loading, refresh and errors | One data owner in the background, with a memory-only cache |
+| 12 | Build tools and UI framework | WXT, TypeScript and Preact |
+| 13 | Testing and CI | A live gate test first, then Vitest, Playwright, a Firefox smoke test and a live checklist |
+| 14 | Browsers and versions | Chrome and Edge 144+, Firefox 140+, desktop only |
+| 15 | Publishing and privacy | Three stores, one privacy policy, no data collection |
+| 16 | License | GPL-3.0-only, with DCO sign-off for contributions |
+| 17 | Name | Weekrow for Canvas |
+| 18 | Settings | Four settings |
+| 19 | Accessibility, language and theme | WCAG 2.2 AA, English text, theme follows the page or system |
+| 20 | No-telemetry guarantee | One fetch wrapper that only reaches the student's Canvas |
+
+## Decisions
+
+### 1. Version 1 scope
+
+**Question:** What should version 1 include?
+
+**Options:**
+
+- A. The core of the original, plus fixes for work Canvas hides.
+- B. Everything the original had, including streaks, confetti, announcements, Gradescope data, Blackboard and D2L.
+- C. A plain list with no rings and no week arrows.
+
+**Decision:** A.
+
+Version 1 has a weekly list with arrows to change the week.
+It has a progress ring for each course in the course color.
+The student can mark items done, see a Done list, and add, edit and delete custom tasks.
+The list includes all of the student's work.
+This also covers work with no due date and work handed in outside Canvas, such as Gradescope, which Canvas's own lists drop.
+
+**Why:**
+
+- Reviewers of the original praised the weekly view, the rings, the clean design, the confetti and the streaks [2].
+- Each feature in option B adds a data source, a screen or stored data.
+  - Streaks need a stored history of daily activity, which conflicts with decision 2.
+    Streak resets also caused many of the original's one-star reviews [2].
+  - Confetti is left out to keep version 1 small.
+    A ring that reaches 100 percent shows a check mark instead.
+- The original's bundle is about 145 KB after gzip.
+  About 12 percent of it is the Blackboard, D2L and Gradescope code [9].
+- Simple Canvas Tasks already shows past-due planner items from the last 21 days [9].
+  The real edges over it are these:
+  - undated work in the same list;
+  - a calendar week with arrows and course rings;
+  - a Done list;
+  - done marks that sync through Canvas;
+  - Firefox and Edge builds;
+  - a clear status on work handed in outside Canvas, such as Gradescope or paper.
+
+### 2. Where done marks and custom tasks live
+
+**Question:** Where should done marks and custom tasks live?
+
+**Options:**
+
+- A. In Canvas: a done mark is a planner override, and a custom task is a planner note.
+- B. In browser storage.
+
+**Decision:** A.
+
+**Why:**
+
+- Canvas's own To Do sidebar and the Canvas mobile apps read the same overrides, so done marks stay in sync everywhere [10].
+- The extension keeps no personal data of its own, and an uninstall loses nothing.
+- Simple Canvas Tasks keeps done marks on one device only [9].
+- The original also used planner overrides and planner notes [9].
+
+**Rules that follow from the facts:**
+
+- A planner note requires a `todo_date` [10].
+  So every custom task has a date (see decision 10).
+- After a POST that creates an override, keep the returned id and use PUT from then on.
+  A second POST for the same item fails, and the original has this bug [9] [10].
+- If a POST still returns 400 because an override already exists, load the current override, then send a PUT.
+  Canvas, its mobile apps and other Canvas pages can create overrides at any time [10].
+- A PUT sets both `marked_complete` and `dismissed`, and an omitted flag becomes false [10].
+  Always send the current value of both flags.
+- Never DELETE an override.
+  Inferred from source: a deleted override cannot be created again, and a PUT on it has no effect [10].
+  This rule applies to overrides only.
+  Custom tasks can be deleted (see decision 10).
+- For an assignment-backed quiz or discussion, send `plannable_type` `assignment` with the assignment id.
+  Canvas then links the override to the quiz or discussion [10].
+- A done mark can also complete a module "mark as done" requirement [10].
+  This is Canvas behavior.
+  The student must know this when they check an item off, not only in the store listing.
+  So the first done mark shows a one-time note: "Done marks sync to Canvas and its apps. On a module item, this can count as 'Mark as done'."
+  The README and the store listing say the same.
+- When a student submits, Canvas sets `marked_complete` to true on an existing override [10].
+
+### 3. What counts as a task
+
+**Question:** Which items count as tasks in the weekly list and the rings?
+
+**Options:**
+
+- A. All work the student must do: assignments, quizzes, discussions, pages with a to-do date, peer reviews and custom tasks.
+- B. Graded work and custom tasks only.
+- C. Everything in the Canvas planner, including calendar events and announcements.
+
+**Decision:** A.
+
+The extension keeps these planner item types: `assignment`, `quiz`, `discussion_topic`, `wiki_page`, `planner_note`, `assessment_request`, `sub_assignment` and `peer_review_sub_assignment` [10].
+It drops `calendar_event` and `announcement`.
+The client must filter them, because no request parameter removes them [10].
+Items from a course group count under that group's course.
+The mapping comes from `GET /api/v1/users/self/groups`.
+If the course lookup fails, the item uses the course or group name that the planner item carries (`context_name`) [10].
+
+**Why:**
+
+- These items are the work a student must finish.
+- The Canvas Course work widget hides pages and ungraded discussions [5] [6].
+- `sub_assignment` items are discussion checkpoints.
+  In courses with checkpoints, Canvas sends only these items and leaves out the parent discussion.
+  The original drops them, so those discussions vanish from its list [9].
+
+### 4. Where the list appears
+
+**Question:** Where should the list appear?
+
+**Options:**
+
+- A. A browser side panel only.
+- B. Inside the Canvas dashboard sidebar only, like the original.
+- C. Both, with one shared UI.
+
+**Decision:** C.
+
+The side panel is the main surface on desktop.
+Chrome and Edge use `chrome.sidePanel`, and Firefox uses `sidebar_action`.
+The in-page list replaces the Canvas To Do list on the classic dashboard (Card View and Recent Activity) and on course home pages.
+On a course home page, the in-page list shows only that course.
+The extension injects nothing on the new widget dashboard, in List View or on any page without the expected anchors.
+On those pages, the student uses the side panel.
+
+**Why:**
+
+- The side panel does not depend on Canvas page markup.
+  The new widget dashboard has no right sidebar: `#right-side` is empty and hidden [13].
+  The 2027 UI restructures the page, and Instructure says custom code that depends on the page structure is not supported [8] [13].
+- Source code and logged-out live tests support side panel reads and writes with the student's session.
+  - Chrome sends SameSite cookies on a request from an extension when the extension has host permission for every URL in the redirect chain [11].
+  - Firefox treats such requests as first-party [12].
+  - Canvas does not check the Origin header on writes.
+    This was confirmed live on two Canvas hosts with a logged-out session [11].
+  - A signed-in test is still needed (see decision 13).
+- The in-page list gives the zero-click view that users of the original liked.
+  The classic anchors (`#right-side-wrapper`, `#right-side`, `.Sidebar__TodoListContainer`) still match production Canvas in October 2026 [13].
+- The widget dashboard's only anchors are test ids, and its package had 16 major versions in 2026 [13].
+  Injecting there would break often.
+- List View hides the right column, and the original forced it visible [9].
+  That is a hack, and the side panel covers List View.
+
+**Opening and closing the panel:**
+
+- The extension declares a toolbar action, and the `activeTab` permission, which shows no install warning.
+- One `action.onClicked` handler opens or closes the panel.
+  - It calls the open or close API first, with no `await` before it, because both browsers require a user gesture [11] [12].
+  - Chrome and Edge use `sidePanel.open`, and `sidePanel.close` from Chrome 141 [11].
+    The code checks that `sidePanel.close` exists, and the live gate test checks it on Edge.
+  - Firefox uses `sidebarAction.open` and `sidebarAction.close` [12].
+  - The extension does not use `openPanelOnActionClick`, because with it the click handler never runs [11].
+- A click on the toolbar button always toggles the panel, like any toggle button.
+- When a click opens the panel on a web page that is not the saved Canvas, the extension checks whether that tab is a Canvas site, with `activeTab` and `scripting` [15].
+  - If it is Canvas, the panel offers "Use this Canvas?" when no address is saved, and "Switch to this Canvas?" otherwise.
+  - The same flow works for `instructure.com` hosts and for custom domains, because the student does not know which kind their school uses.
+  - The offer shows only in the panel, in every state that has a saved address too.
+    The in-page list never shows it, because it lives on the saved Canvas page.
+- The background knows which windows have an open panel.
+  - Each panel opens a `runtime.connect` port tagged with its window id, and the port closes with the panel.
+    This works the same way in all browsers, and Firefox has no sidebar open or close events [12].
+  - Chrome stops an idle service worker after 30 seconds, and an open port alone does not keep it running [24].
+    So each open panel sends a heartbeat message on its port every 20 seconds.
+  - If the port disconnects while the panel is still open, the panel connects again at once.
+    The background then rebuilds its record of open panels.
+- The keyboard shortcut is `_execute_action`, which runs the same click handler.
+- There is no in-page "open panel" button.
+  A content script click cannot open the Firefox sidebar, and on Chrome it is unreliable [11] [14].
+- Use a global panel, not a per-tab panel.
+  Microsoft recommends this for Edge [11].
+- Do not use hash routing in the panel.
+  Edge reloads a panel with a hash URL on every tab switch [11].
+
+**In-page rules:**
+
+- Every Canvas page has `#right-side-wrapper`, but Canvas shows it only when the body has the `with-right-side` class [13].
+- On the dashboard, mount only when the body has `with-right-side` and one of `.Sidebar__TodoListContainer`, `.todo-list-header` or `.coming_up` appears inside `#right-side`.
+  A `MutationObserver` waits for them, as the original did [9].
+  The widget dashboard and List View never meet this condition [13].
+- On a course home page, mount only when the path is exactly `/courses/:id` and the body has `with-right-side`, as the original did [9].
+- Mount the list as a sibling before `#right-side`, inside `#right-side-wrapper`.
+  Canvas replaces the contents of `#right-side`, so a node inside it would be lost [13].
+- Hide only the student To Do list (`.Sidebar__TodoListContainer`).
+  Keep Coming Up, Recent Feedback and the other sidebar content.
+- A user who also has a teacher, TA or designer role gets the legacy teacher To Do list instead [13].
+  The in-page list then mounts above it, and the teacher list stays visible.
+- On the home page of a course that the student hid (decision 18), show a one-line note with a link to the settings instead of the list.
+- Hide the native To Do list only after the first successful render.
+  Show it again if the list ends in an error state.
+- While the side panel is open in a window, the in-page list in that window collapses to one line: "Shown in the side panel".
+  This avoids two copies of the same list.
+  The background tells the Canvas tabs in that window with `tabs.sendMessage`.
+  It finds those tabs with `tabs.query` on the saved address, which the host permission allows [24].
+- Each page layout has its own small adapter.
+  An adapter that finds no anchor does nothing.
+- K-5 course home pages have no right column, so the adapter does nothing there [13].
+- The in-page list is a glance, not the full list.
+  A group with more than 4 items shows its first 3, and a "Show N more" link opens the rest in place.
+  A link that would hide only one item takes the same space as that item, so smaller groups show in full.
+  The side panel shows every item.
+  Without this cap, a full week pushes Coming Up and Recent Feedback far down the page.
+- On a course home page, the rows do not repeat the course name, because the whole list is that course.
+
+**Widths:**
+
+- The in-page column gives about 240 px of content width [13].
+- The Chrome and Edge panel opens at 360 px, which is the Chromium minimum [11].
+- The Firefox sidebar opens at 18em and can shrink to 14em [12].
+  Inferred from common system font sizes, that is about 170 to 230 px.
+- The shared UI must work from 170 px up.
+  Below 240 px, it uses a compact layout: smaller rings that wrap to more rows, and icon-only header buttons.
+- Canvas stacks the right column under the content below 992 px, or below 1140 px with the course navigation open [13].
+  The in-page list then appears below the content, as the Canvas To Do does.
+
+### 5. Site access and onboarding
+
+**Question:** How does the extension get access to each school's Canvas site?
+
+**Options:**
+
+- A. Required access to all sites (`https://*/*`), as the original and Simple Canvas Tasks do.
+- B. Required access to `https://*.instructure.com/*`, plus optional access to `https://*/*` that the student grants for one custom domain.
+- C. Optional access only.
+
+**Decision:** B.
+
+**Manifest:**
+
+- `manifest_version`: 3 for every browser.
+  WXT builds Firefox as Manifest V2 by default, and a V2 build silently drops `optional_host_permissions` [19].
+- `host_permissions`: `https://*.instructure.com/*`
+- `optional_host_permissions`: `https://*/*`
+- `permissions`: `storage`, `cookies`, `scripting`, `activeTab`, and `sidePanel` on Chrome and Edge
+- `action`, with no popup
+- `side_panel` on Chrome and Edge, and `sidebar_action` on Firefox
+
+**Why:**
+
+- Access to all sites shows the strongest install warning: "Read and change all your data on all websites" [15].
+  It can also slow the Chrome Web Store review [15] [16].
+- Optional host permissions show no install warning [11] [15].
+- Custom domains are rare among all Canvas schools but common among large universities.
+  They are about 7 percent of school domains, but at least 24 of 39 large US universities checked use one [15].
+  So the first run must be smooth.
+- Chrome is testing a change that makes new installs ask before the extension runs on any site, even for required permissions [15].
+  If it ships, a grant step is needed anyway.
+- The `cookies` permission lets the extension read the `_csrf_token` cookie for writes, and it shows no install warning [11].
+
+**First run:**
+
+- On Chrome and Edge, a local welcome page opens on install.
+  The panel cannot open by itself [11].
+  The page shows how to pin the toolbar button and the keyboard shortcut.
+  It also has the address field and the "Allow access" button, because an extension page can call `permissions.request` [15].
+- On Firefox, the sidebar opens at install (`open_at_install` is true).
+  The same setting also lets Firefox reopen the sidebar at startup [12].
+  The sidebar shows the same first-run steps.
+
+**Finding the Canvas address:**
+
+1. When the student opens the panel from a Canvas tab, the panel offers "Use this Canvas?" (decision 4).
+2. On an `instructure.com` Canvas page, the content script detects Canvas and saves the address, but only when no address is saved yet.
+3. The student can also type the address.
+   The extension reduces the input to an origin: it adds `https://` and removes any path.
+4. The student clicks "Allow access".
+   The click handler calls `permissions.request` at once, with no `await` before it [12] [15].
+5. The extension confirms the site with `GET /api/v1/users/self`.
+   A 200 response or a 401 response with `WWW-Authenticate: Bearer realm="canvas-lms"` means Canvas [15].
+6. All requests use `redirect: "manual"`, so a redirect returns an opaque response with no target address.
+   If the check gets such a response, the panel says that this address redirects.
+   It asks the student to open Canvas in a tab, sign in and click the toolbar button there, so that step 1 gives the real address.
+   Chrome drops Lax cookies when any host in the redirect chain lacks permission, so the extension must use the final host [11].
+7. The extension saves the address only after step 5 succeeds.
+
+**Rules after setup:**
+
+- Version 1 supports one Canvas address.
+- On any other Canvas host, the content script does nothing.
+  To switch, the student opens the panel from that Canvas tab, and the panel offers "Switch to this Canvas?" (decision 4).
+- Test and beta hosts (`*.test.instructure.com`, `*.beta.instructure.com`) are never saved automatically.
+- The static content script for `*.instructure.com` detects Canvas, and it mounts only when the page origin equals the saved address.
+- One idempotent sync function keeps the runtime content script registration correct [24].
+  - It registers a script only when the saved address is outside `instructure.com`, so that one page never runs two copies.
+  - It lists the registered scripts, removes the old ones and registers one script for the saved origin.
+  - It registers only when `permissions.contains` is true.
+  - It runs on install, on update, at browser start, when permissions change and when the address changes.
+  - A plain re-register at startup would fail, because registered scripts persist and a duplicate id is an error [24].
+  - Firefox clears registered scripts on update [24].
+- In WXT, the runtime-registered content script must not declare `https://*/*` in its matches.
+  WXT adds those matches to the required host permissions [19].
+  CI checks the built manifest.
+- If access is later withheld or removed, the panel shows an "Allow access" state.
+  `permissions.request` can grant a withheld required permission again [15].
+- In the "Signed out" state, the panel shows the saved address and a "Wrong address? Change it" link.
+- "Change" in the settings and "Wrong address? Change it" open the address form, but they keep the saved address until a new one passes the check.
+  The form offers "Keep using school.instructure.com" as a cancel.
+- When the check of a new address fails while another address is still saved, the panel offers "Keep using school.instructure.com".
+  That action goes back to the saved address and its list.
+- When the check of a typed address fails at the network level, the panel says "Couldn't reach <host>. Check the address." with the form.
+  It does not say "You're offline", because the usual cause is a wrong address.
+- The extension removes an optional site grant that it no longer needs: after a check ends as not Canvas or as a redirect, and after the student replaces or clears a custom domain.
+- A content script never saves the address itself.
+  It reports a detected Canvas to the background, which saves it only when no address is saved and the sender page has that origin.
+
+### 6. List layout and item placement
+
+**Question:** How is the list grouped, and where does each item appear?
+
+**Options:**
+
+- A. Place every item by its date and its state only.
+  Facts about how Canvas tracks an item show as a status on the item (decision 7).
+- B. Give special kinds of work their own sections, such as work that Canvas cannot confirm.
+
+**Decision:** A.
+
+**Why:**
+
+- A student thinks of each item as work due on a day.
+  A Gradescope homework due Tuesday is a Tuesday task, like any other.
+- How Canvas tracks an item is a fact about that item, not a place in the list.
+  A status chip shows that fact where the student already looks.
+- A separate section splits one to-do list into two places.
+  The work a student forgot is exactly the work they would not look for in a collapsed section.
+- Option B came from where the data comes from, not from how students think.
+
+**Item states:**
+
+Each item is in one of three states, checked in this order:
+
+1. **Done:** the done rule in decision 8 says so.
+2. **Skipped:** not done, and its override has `dismissed` set to true.
+   One exception: work handed in on Canvas with a redo request and an override that is both marked complete and dismissed counts as open.
+   Canvas sets both flags when the student submits or uses a module's "Mark as done", so that pair means the student finished the work before the redo request.
+3. **Open:** everything else.
+
+**Groups in the current-week view, from top to bottom:**
+
+1. **Past due:** open work with a due date before now.
+   - Items due in the last 7 days show in full, newest first.
+   - Older items collapse under "N older".
+     That line has a "Skip all older" action with an Undo notice, so a student who installs in the middle of a term can clear old work at once.
+2. **Today**, **Tomorrow**, then each later day of the week that has items.
+3. **No due date:** collapsed, with a count.
+4. **Done:** collapsed, with a count.
+
+When the week has no items, "Nothing due this week" replaces the day groups only.
+Past due, No due date and Done still show.
+
+**Other weeks:** one group for each day with items, then Done.
+Every item that is not done stays in its day group, with its status chip (decision 7).
+
+**Placement rules:**
+
+- Each item has one key: the assignment id for assignment-backed items, otherwise the planner type plus the planner id.
+- Each item goes to exactly one group, chosen by its date and its state:
+  - done and dated in the viewed week: Done;
+  - open and past due, in the current-week view: Past due;
+  - open and due later: its day;
+  - open with no due date: No due date;
+  - skipped: the "N skipped" line of its group (see Skip).
+- In the current-week view, Done also holds done items from earlier weeks that still have a warning chip (decision 7).
+  So the warning count on the Done header covers them.
+- Reminders (decision 7) follow their own rule: they show only on their day.
+- A status never moves an item.
+  So the list renders as soon as the planner items arrive, and the chips fill in later without any item moving.
+- Done items with no due date show at the end of the No due date group, under a small "N done" line.
+  So the student can undo a wrong mark at any time.
+  A done undated item with a warning chip goes to Done instead, so the Done header counts the warning.
+- When the student marks an item done, skips it or deletes a task, an "Undo" notice shows.
+  The notice has no timer: it stays until the student acts again or closes it.
+  Ctrl+Z (Cmd+Z on a Mac) also undoes while the notice shows.
+  A fixed time limit would fail keyboard and screen reader users, who need time to reach the notice.
+
+**Skip:**
+
+- Every open item in Past due or No due date has a "Skip" action next to its checkbox.
+- Skip means "I will not do this".
+  Done means "I finished this".
+  They stay separate, because a skipped item is not finished, and a done mark can complete a module requirement (decision 2).
+- Skip sends the override with `dismissed` set to true and the current `marked_complete` value [10].
+  For work handed in on Canvas with a redo request, Skip sends `marked_complete` false, because the done mark no longer applies.
+- Canvas uses the same flag for its own list of missing work [10].
+  The first Skip shows a one-time note: "Skipping also hides this item in Canvas's list of missing work."
+- In Past due and No due date, skipped items leave the group.
+  An "N skipped" line at the end of the group shows them again, with an "Unskip" action.
+- In a day group of any week, a skipped item stays on its day with a neutral "Skipped" chip and an "Unskip" action.
+- When the student unchecks a done item, the extension sends `dismissed` false with `marked_complete` false.
+  Canvas also sets `dismissed` to true when a student uses a module's "Mark as done" [10].
+  Without this rule, an unchecked item would turn into a skipped item.
+
+**Rings and filters:**
+
+- Rings count the items dated in the viewed week, wherever they show (decision 8).
+- A click on a ring filters every group to that course.
+
+### 7. Item status
+
+**Question:** How does each item show what Canvas knows about it?
+
+**Options:**
+
+- A. One set of status chips, computed the same way for every item, in every group and every week.
+- B. Different labels for each group or each data source.
+
+**Decision:** A.
+
+**How the work is handed in:**
+
+The extension reads the hand-in method from the `submission_types` of each assignment [10].
+Planner items do not include it, so the extension looks it up (decision 11).
+
+| Hand-in method | Submission types | What the student sees |
+|---|---|---|
+| On Canvas | `online_upload`, `online_text_entry`, `online_url`, `media_recording`, `student_annotation`, `online_quiz`, `discussion_topic`, and New Quizzes | No hand-in chip. Canvas checks the item off when the student submits [10]. |
+| Outside Canvas | `external_tool` (not a New Quiz) and `on_paper` | A chip with the tool name, such as "Gradescope", or "On paper". Its tip says: "Canvas can't see this hand-in. Check it off when you hand it in." |
+| Nothing to hand in | `none`, `not_graded`, `attendance` and `wiki_page` | A reminder (see below). |
+
+- A New Quiz has the type `external_tool`, but `is_quiz_lti_assignment` is true, and Canvas tracks it like any Canvas quiz [10].
+- The tool name comes from the host in `external_tool_tag_attributes.url` [10].
+- Discussion checkpoints (`sub_assignment`) and peer reviews are done inside Canvas, so they count as "On Canvas" with no lookup.
+- A peer review row says "Peer review" under its title, because its title is the title of the assignment the student reviews.
+- Pages with a to-do date, ungraded discussions and custom tasks are tasks that the student checks off.
+  A teacher or the student set their date on purpose, so they follow the normal rules.
+
+**Reminders:**
+
+- An assignment with nothing to hand in is a reminder for a day, such as "Participation, week 9" or "Read chapter 3".
+- A reminder shows only on its day, with a neutral "No hand-in" chip and a checkbox.
+- A reminder never goes to Past due or No due date, and it does not count in a ring.
+- An undated reminder does not show at all, because it has no day.
+- Why: Canvas has no way to know whether such an item is finished, and many of them are gradebook columns.
+  One rule for dated and undated reminders keeps them from sitting in Past due until a teacher grades them.
+
+**Status chip:**
+
+An item that is not done can have one status chip.
+The first rule that matches wins.
+
+1. **Skipped:** the student skipped the item (decision 6).
+2. **Redo requested:** the teacher asked for a redo [10].
+3. **Missing:** Canvas marks the work missing [10].
+   Only this chip is red, because only this status counts against the grade and shows to the teacher.
+4. **Teacher status:** the name of a custom grade status that the teacher set, such as "Incomplete" [10].
+5. **Extended:** the teacher gave an extension (`late_policy_status` is `extended`) [10].
+6. **Can't confirm:** the work is past due, and it is handed in outside Canvas.
+   Its tip says: "Canvas can't see this hand-in. If you handed it in, check it off."
+7. **Past due:** any other open item with a date before now, in a view that has no Past due group.
+   In the current-week view, the Past due group already says this, so the chip does not show there.
+
+There is no warning color on any chip except Missing.
+
+**Availability marker:**
+
+Availability is a separate small marker next to the status chip, because it answers a different question: can the student still hand it in?
+
+- **Opens on a date:** the item is locked until a later date, for example "Opens Nov 3".
+- **Closed:** the lock date has passed, so Canvas no longer accepts a hand-in [10].
+  This marker shows only for work handed in on Canvas.
+  For work handed in outside Canvas, the Canvas lock date says nothing about the outside tool.
+- A Missing item that is also Closed tells the student that Skip is the right action.
+
+**Chips on done items:**
+
+- **Missing in Canvas:** the student checked the item off, but Canvas still marks it missing.
+  This warning shows for every hand-in method.
+  For work handed in outside Canvas, Canvas reports missing only when the teacher set it [10], and the tip says so.
+- **Redo requested:** the student checked off work handed in outside Canvas, but the teacher asked for a redo.
+  This is a warning chip (see decision 8).
+- **Excused:** the teacher excused the work, so the student knows why it is done.
+- When any done item has a warning chip, the collapsed Done header shows a warning count.
+  The student sees it without opening the group.
+
+**Where the chip data comes from:**
+
+- `missing`, `submitted`, `graded`, `excused` and `redo_request` come with each planner item, so these chips show at once [10].
+- `late_policy_status`, `custom_grade_status_id` and the lock dates come from the assignments request with `include[]=submission` [10].
+  Those chips fill in when that request returns.
+- The name for a teacher status comes from the Canvas GraphQL API (`customGradeStatusesConnection` on the course), once per course per session [10].
+  Inferred from source; the live gate test checks it.
+
+**Which undated work shows:**
+
+- An undated item shows in No due date when the student has something to hand in, on Canvas or outside it.
+- Undated items use the same chips and markers as every other item.
+
+**Why:**
+
+- The student asks two questions about each item: is it done, and can Canvas see it?
+  A chip on the item answers both, in the place where the student already looks.
+- A paper lab and a Gradescope homework are the same case for the student: real work handed in outside Canvas.
+  An earlier draft treated only Gradescope work this way, because only that work came from a separate query.
+- Red stays for Canvas "Missing" only.
+  So the student can tell work that hurts the grade from work that Canvas simply cannot see.
+- Gradescope may post nothing to Canvas until grades are released, but that evidence comes only from a search summary of a Gradescope guide [25].
+  The chip design works either way.
+  The student checks off what they handed in, and the rest stays in plain view.
+
+### 8. What counts as done, and the rings
+
+**Question:** When is an item done?
+
+**Options:**
+
+- A. Copy the Canvas planner rule exactly.
+- B. Use the Canvas rule, and also count excused work and graded work as done.
+- C. Use the original's rule, which also checks for a zero score with GraphQL.
+
+**Decision:** B, with one extra rule for redo requests.
+
+1. Work handed in on Canvas with a redo request is not done, even if the student checked it off.
+   Its checkbox is disabled, with the tip "Resubmit in Canvas to finish this."
+2. Otherwise, if the item has a planner override, it is done when `marked_complete` is true.
+3. Otherwise, a peer review is done when its `workflow_state` is `completed`.
+4. Otherwise, an item is done when one of these is true:
+   - it is submitted;
+   - it is excused;
+   - it is graded and not missing.
+
+**Why:**
+
+- Rules 2 and 3 match the Canvas planner [10].
+  Canvas also sets an existing override to done when the student submits, so the override can safely win [10].
+- Rule 1 is stricter than the Canvas planner.
+  A redo request means the teacher wants more work.
+  Canvas clears the request only when a new submission attempt is saved [10], so a resubmission finishes the item.
+- Rule 1 covers only work handed in on Canvas.
+  A redo done in Gradescope or on paper may never reach Canvas, so the request would never clear.
+  For that work the checkbox wins, and "Redo requested" stays as a warning chip on the done item (decision 7).
+- Canvas's rule leaves excused work and on-paper work that a teacher graded as not done.
+  The student has nothing left to do for such work.
+- "Not missing" keeps work with an automatic zero for a missing submission in the list.
+- Option C needs GraphQL.
+  Canvas rejects queries with more than 20 aliases, and the original's batch fails silently when a view has more than 20 graded items [9].
+- Request planner items with no completion filter, and compute done on the client.
+  Canvas's server filters ignore done marks on some item types [10].
+
+**Rings:**
+
+- There is one ring per course that has items dated in the viewed week.
+  In the current-week view, every course with items in Past due also has a ring.
+- A ring counts items, not points, as in the original [9].
+  Skipped items and reminders do not count.
+- The center of the ring shows "done/total".
+  A course with no items this week shows an empty ring.
+- A ring shows a check mark at 100 percent only when the course has no item in Past due.
+  Otherwise, a small badge on the ring shows the number of past-due items.
+- Each ring has a text label for screen readers, such as "3 of 3 done this week, 1 past due".
+- Custom tasks with no course share one "Personal" ring.
+- When the course lookup fails for an item, the ring uses the course or group name that the planner item carries (`context_name`) [10].
+- Rings appear in dashboard order from `GET /api/v1/users/self/dashboard_positions` [10].
+- Ring colors come from `GET /api/v1/users/self/colors` [10].
+  - A course with no saved color gets one of Canvas's 12 default dashboard colors, picked by a hash of the course id [10].
+  - The extension never writes a color back to Canvas.
+
+### 9. Week, time zone and past-due work
+
+**Question:** How is a week defined, and how does past-due work show?
+
+**Options:**
+
+- A. A calendar week in the student's Canvas time zone, with the start day taken from the Canvas language.
+- B. The original's default: Monday 3:00 pm to Monday 3:00 pm in the browser's time zone.
+- C. A rolling seven days from now.
+
+**Decision:** A.
+
+**The week:**
+
+- The week starts at 00:00 on its start day, in the Canvas time zone [10].
+  The time zone is the IANA name in `time_zone` from `GET /api/v1/users/self/profile` [10].
+- The start day comes from the Canvas language in `effective_locale` from the same call [10].
+  `locale` is null for most students, so it is only a fallback, and the browser language comes after it.
+- The start day is Sunday for English (US), Monday for English (UK), English (Australia) and most European languages, and Saturday for Arabic and Persian [10].
+- Canvas has no setting for the first day of the week [10], so the extension has its own setting.
+- The arrows move one week.
+  A "This week" button returns to the current week.
+- Date math uses the Temporal API.
+  Chrome and Edge ship it from version 144, and Firefox from version 139 [18].
+
+**The past-due horizon:**
+
+- Each course has its own horizon: the later of its start and 16 weeks ago, but never later than the start of the current week.
+  - The start is the course's own `start_at` when `restrict_enrollments_to_course_dates` is true, otherwise `term.start_at` from the courses request with `include[]=term` [10].
+  - A course with no start uses 16 weeks ago.
+  - The cap at the start of the current week keeps this week's work in Past due and the rings, even when a term starts in the future.
+- Hidden courses (decision 18) do not count.
+- Past due shows an item only when its date is after the horizon of its course.
+- Why: a student sees one list of what they still owe, so every kind of item uses the same horizon.
+  The cap of 16 weeks stops one long-running course, such as an orientation course, from pulling in years of old items.
+
+**The planner request:**
+
+- Every planner request starts at the earliest horizon of the visible courses.
+  Older-style peer reviews come back only when the range covers the reviewer's own assignment due date [10].
+  This start brings them back in the week of their real date.
+- The request ends at the end of the viewed week, or at the end of tomorrow if that is later, for the look-ahead.
+- `start_date` and `end_date` are plain UTC instants, such as `2026-11-02T04:59:59.999Z`.
+  Canvas rejects a date string that has a time zone name in brackets [10].
+- `end_date` is one millisecond before the next day or week starts.
+  Most Canvas planner ranges include both ends [10].
+- The planner range covers every kind of item, including work that Canvas marks missing [10].
+  So the extension needs no separate request for missing work.
+- The client places every item by its own date, peer reviews included.
+  Items outside the viewed week, outside Past due and outside the Tomorrow look-ahead are dropped.
+- Every light and full round loads one range that covers all the weeks in use.
+  So a peer review whose reviewer's own due date falls in a later week that the student has viewed also shows in its real week.
+- Known limits:
+  - A peer review whose reviewer's own due date falls after every week in use shows only once that date is in range.
+    This happens when the reviewer has an extension.
+  - Canvas never returns an older-style peer review on an undated assignment [10].
+
+**Past-due work:**
+
+- Past due shows in the current-week view only.
+  In other weeks, items stay on their day with their status chip.
+- Past-due items from earlier in the current week also go to Past due, not to their day.
+
+**Look-ahead:**
+
+- When tomorrow falls in the next week, the Tomorrow group still shows tomorrow's items.
+- These items show their date, and they do not count in this week's rings.
+
+**Times:**
+
+- Times show in the Canvas time zone.
+- When the browser's time zone differs, the header shows the zone, for example "Times in ET".
+
+**Why:**
+
+- The original's 3:00 pm start puts work due on Monday morning into the previous week [9].
+- The original uses the browser's time zone with no label, so a student who travels sees wrong days [9].
+- A rolling window does not match how courses plan work.
+- The look-ahead keeps deadlines that are hours away in view on the last day of the week.
+
+### 10. Custom tasks
+
+**Question:** What can the student do with custom tasks?
+
+**Options:**
+
+- A. Create, edit and delete them.
+- B. Create them only, as the original did.
+
+**Decision:** A.
+
+- The form has a title (required), a "Do on" date, an optional time, an optional course and optional details.
+  - The date field says "Do on", not "Due", because for a personal task the date means when the student plans to do it.
+  - If the time is empty, the extension stores 11:59 pm.
+- Create uses `POST /api/v1/planner_notes`.
+  Edit uses `PUT /api/v1/planner_notes/:id`.
+  Delete uses `DELETE /api/v1/planner_notes/:id`, which is a soft delete in Canvas [10].
+- Delete shows the "Undo" notice.
+  The DELETE is sent when the notice ends: the student acts again, closes the notice or closes the surface.
+  The background sends it after 2 minutes at the latest, so a closed panel cannot keep a task alive.
+- The default date is today when today is in the viewed week.
+  Otherwise, it is the first day of the viewed week.
+  So a new task never vanishes from the view.
+- The course picker shows the student's active courses, except hidden courses (decision 18).
+- A click on a custom task opens its edit form, because planner notes have no Canvas page [10].
+- Marking a custom task done uses a planner override of type `planner_note` [10].
+- A custom task with a past date shows in Past due like any other open work.
+  It also has a "Move to today" action, which sends one PUT of `todo_date`.
+
+**Why:**
+
+- Option B leaves typos and wrong dates with no fix.
+- Simple Canvas Tasks deletes a task when it is marked done, and the original allowed deletion only after completion [9].
+  Option A keeps done marks and deletion separate.
+- A Canvas planner note needs a date [10], so a custom task cannot be undated.
+  The date also puts the note on that day in Canvas's own planner.
+  Storing undated tasks somewhere else would break decision 2.
+
+### 11. Data loading, refresh and errors
+
+**Question:** How does the extension load data, keep it fresh and handle errors?
+
+**Options:**
+
+- A. One data owner in the background, which every surface asks for data.
+- B. Each surface fetches its own data.
+
+**Decision:** A.
+
+**Why:**
+
+- Each window can have its own panel, and each Canvas tab its own in-page list [12].
+  With option B, a refresh round can reach more than 100 requests.
+  All of them share one rate limit with the student's own Canvas tabs, and about 12 parallel requests fill it [10].
+- One owner gives one request queue and one cache.
+
+**How it works:**
+
+- The background service worker on Chrome and Edge, or the background page on Firefox, owns all Canvas requests.
+- Every light and full round also asks `GET /api/v1/users/self`, in parallel with the planner.
+  When the user id differs from the cached one, the round drops everything it loaded and all cached data, and loads the new user from scratch.
+  On a shared computer, one student must never see another student's work.
+- A failed request for one course, including a server error, skips only that course.
+  Only failures of the shared requests (session data and the planner) make the whole round fail.
+- Panels and content scripts ask it for data with runtime messages.
+- The cache lives in `storage.session`.
+  It is held in memory, never written to disk, and it survives service worker restarts and panel reloads.
+  So decision 2 stays true, and a panel that opens while offline still has the last data.
+- The background keeps at most 3 requests in flight [10].
+- After each write, the background stores a change marker (a time stamp only) in `storage.local`.
+  Every surface listens to `storage.onChanged` and refreshes.
+  `runtime.sendMessage` does not reach content scripts, so it cannot do this job [24].
+- The extension stores only these items in `storage.local`: its settings, the Canvas address, the change marker, and which one-time notes the student has seen.
+
+**Fallback:** Background fetches with the student's cookies have not been tested live.
+Firefox treats requests from extension pages with host permission as first-party [12].
+For the Chrome service worker, no source confirms the behavior.
+The data module does not depend on where it runs, so a fallback changes only the message routing.
+If the live gate test (decision 13) fails on a browser, that browser uses these paths:
+
+- Each in-page list fetches data for its own tab with same-origin requests from its content script.
+  Existing extensions prove this path [9].
+- The first panel that connects becomes the only panel data owner.
+  The other panels read its results from `storage.session`.
+- If panel fetches also fail, the panel sends its requests through the content script of an open Canvas tab with `tabs.sendMessage`.
+  With no such tab open, the panel shows "Open Canvas to load your list".
+
+**Refresh triggers:**
+
+- A "Canvas page loaded" message from the content script, or a window that gains focus, refreshes the planner items only.
+  This covers sign-in, submissions and done marks made in Canvas itself.
+- A 5-minute timer refreshes everything, including the assignment details, the undated work and the override list.
+- A write, or the change marker in `storage.local`, refreshes everything.
+- A change of the saved address refreshes everything.
+- At midnight in the Canvas time zone, the surfaces recompute the current week and the day groups.
+  If the planner range changes, they also refresh the planner items.
+- At most one refresh round runs per 60 seconds.
+  A write and a change of address skip this limit.
+- The 5-minute and midnight timers run in each visible panel or in-page list, not in the background.
+  A stopped service worker loses its timers [24], and this way no `alarms` permission is needed.
+
+**Requests:**
+
+| Data | Request | When |
+|---|---|---|
+| Sign-in check | `GET /api/v1/users/self` | Setup, every light and full round, and after any 401 |
+| Time zone and language | `GET /api/v1/users/self/profile` | Once per session |
+| Courses | `GET /api/v1/courses?enrollment_state=active&enrollment_type=student&include[]=term&per_page=100` | Once per session |
+| Groups | `GET /api/v1/users/self/groups?per_page=100` | Once per session |
+| Course colors | `GET /api/v1/users/self/colors` | Once per session |
+| Course order | `GET /api/v1/users/self/dashboard_positions` | Once per session |
+| Week items | `GET /api/v1/planner/items?start_date=...&end_date=...&per_page=100` | Each week view |
+| Assignment details | `GET /api/v1/courses/:id/assignments?assignment_ids[]=...&include[]=submission&per_page=100` | Each week view, per course with assignment items; 5-minute timer |
+| Teacher status names | `POST /api/graphql` with `customGradeStatusesConnection` for each course | Once per session, when a teacher status appears |
+| All assignments (planner turned off only) | `GET /api/v1/courses/:id/assignments?include[]=submission&per_page=100` | Instead of the planner, per course |
+| Undated work | `GET /api/v1/courses/:id/assignments?bucket=undated&...` | 5-minute timer, per course |
+| Overrides | `GET /api/v1/planner/overrides?per_page=100` | 5-minute timer, when No due date has items |
+
+**Request rules:**
+
+- The assignment details request holds at most 100 ids, and `per_page` must be at least the number of ids, or Canvas returns 400 [10].
+  - The ids come from planner items: `plannable_id` for `assignment` items, and `plannable.assignment_id` for graded quizzes and graded discussions [10].
+  - Never send ids of `sub_assignment` or `peer_review_sub_assignment` items.
+    They are not assignments in this API, and one such id makes Canvas reject the whole request [10].
+  - Hand-in types rarely change, so they are cached for the browser session.
+- The undated work request is `GET /api/v1/courses/:id/assignments?bucket=undated&include[]=submission&exclude_checkpoints=true&per_page=100`, for each course that is not hidden [10].
+  - The `undated` bucket uses the student's own due date after overrides [10].
+  - `exclude_checkpoints=true` matters.
+    A checkpointed discussion has no due date on its parent assignment, so without it every such discussion would look undated [10].
+    As a guard, the client also drops any assignment with `has_sub_assignments` true.
+- Overrides for undated items come from `GET /api/v1/planner/overrides`, because the assignments API has no override data [10] [17].
+  - The endpoint returns every active override the user ever made, with no filter [10].
+  - It has no stable order, so the client removes duplicate ids across pages [10].
+  - The client matches an override to an assignment by the override's `assignment_id`, not by its planner id [10].
+- Send no `context_codes` to the planner.
+  If the request leaves out the user's own code, Canvas can return a stale cached page after a new submission [10].
+- Send `Accept: application/json+canvas-string-ids, application/json`.
+  Canvas ids can be larger than JavaScript numbers can hold [9] [11].
+- Remove a leading `while(1);` from a response if present [11].
+- Follow `Link: rel="next"` for every list.
+- Use `redirect: "manual"`, so that a redirect can never reach another origin.
+- On HTTP 429, or HTTP 403 with the plain text "Rate Limit Exceeded", wait and retry with backoff [10].
+- Send writes with `X-CSRF-Token` set to the URL-decoded `_csrf_token` cookie, read with the `cookies` API [11].
+- A failed request for one course skips that course and shows a short note, such as "Couldn't load BIO 110."
+  The rest of the list still shows.
+
+**States the UI must show:**
+
+| State | How it is detected | What the UI shows |
+|---|---|---|
+| Loading | No cached data yet | A skeleton with the final layout, so nothing jumps |
+| Not set up | No saved Canvas address | The first-run steps |
+| No access | `permissions.contains` is false | An "Allow access" button |
+| Signed out | Any 401, then `GET /api/v1/users/self` returns 401 | An "Open Canvas to sign in" button, the saved address and a "Change it" link |
+| Planner turned off | `users/self` returns 200, and the planner returns 403 with JSON `status` `unauthorized` | The same list and chips, built from the "All assignments" request and the override list. One line says: "Your school limits the Canvas planner. Pages, ungraded discussions, ungraded quizzes, peer reviews, discussions with reply due dates and your own tasks can't show." The add-task button is disabled, with that reason. |
+| No active courses | The courses list is empty | "No active courses" |
+| Nothing due | The week has no items | "Nothing due this week" |
+| Not Canvas | Setup check fails | "This address is not a Canvas site" |
+| Unreachable | The setup check fails with a network error | "Couldn't reach <host>. Check the address." with the form |
+| Can't refresh | HTTP 429, 403 with "Rate Limit Exceeded", HTTP 5xx, or a network error | The last data, with one line: "Couldn't refresh. Showing your list from 3:05 pm." and a Retry button. On a network error while the browser reports no connection, the line also says "You're offline." |
+
+Notes on these states:
+
+- The "Planner turned off" state comes from the Canvas "Limited Access for Students" setting [10].
+  For a signed-in user, Canvas answers 403, not 401 [10].
+  Planner notes also return 403 in this state, but overrides still work [10].
+- The Canvas session cookie lasts for one browser session, and the server ends it after a day without activity by default [11].
+  So "Signed out" is a common state, not a rare error.
+- In Firefox private windows and container tabs, the extension uses a different cookie store [12].
+  The signed-out notice says so on Firefox.
+- The student cares whether the list is current, not why a refresh failed.
+  So one "Can't refresh" state covers every cause, and the code keeps the cause for its retry logic.
+- With no cached data, the "Can't refresh" state shows the notice alone.
+- In the "Planner turned off" state, the assignments API and overrides are not in the list of blocked calls in the source [10].
+  The live gate test confirms this (decision 13).
+  - The client filters the "All assignments" results by due date, from the horizon to the end of the viewed week.
+  - It maps `submitted_at`, `workflow_state`, `excused`, `missing` and `redo_request` from each submission into the same done rule [10].
+  - The override list loads every time in this state, and the page-load refresh points at these requests.
+
+### 12. Build tools and UI framework
+
+**Question:** Which build tool and UI framework should the extension use?
+
+**Options for the build tool:**
+
+- A. WXT.
+- B. CRXJS.
+- C. Plasmo.
+
+**Options for the UI framework:**
+
+- A. Preact.
+- B. Plain TypeScript with no framework.
+- C. Svelte 5.
+- D. Lit.
+
+**Decision:** WXT 0.21 with the exact version pinned, TypeScript in strict mode, and Preact 11 with `@preact/signals`.
+
+**Why WXT:**
+
+- It builds Chrome, Edge and Firefox from one codebase [19].
+- It maps the side panel to `sidebar_action` for Firefox [19].
+- It makes the source zip that Firefox Add-ons requires [19].
+- It has helpers for Vitest [19].
+- WXT is still before version 1.0, and each 0.x release has breaking changes, so the version is pinned [19].
+- Plasmo has had no release since May 2025 [19].
+  Firefox Add-ons does not accept build tools that appear unmaintained [20].
+- CRXJS does not map the side panel for Firefox and does not make zips [19].
+
+**Why Preact:**
+
+| Framework | Small to-do app, gzip |
+|---|---|
+| Plain TypeScript | 0.4 KB |
+| Preact 11 | 5.7 KB |
+| Solid | 5.7 KB |
+| Lit | 6.7 KB |
+| Svelte 5 | 12.9 KB |
+| React 19 | 67.6 KB |
+
+These sizes come from one test build of the same small app [19].
+
+- Preact keeps the UI code short and readable for a small runtime cost.
+- Plain TypeScript would need hand-written DOM updates for the rings, the list and the forms.
+- Lit cannot register custom elements in a Chrome content script [19].
+- Solid sends its events through the document, which can conflict with WXT's event isolation [19].
+
+**Other rules:**
+
+- The in-page UI lives in an open shadow root that the extension attaches itself, with its CSS in a `<style>` element [19].
+  Styles in a shadow root work in both engines, even under a strict page CSP [19].
+  WXT's `createShadowRootUi` would add about 3.3 KB gzip to each content script for features the extension does not use.
+- Storage uses a small typed wrapper over `browser.storage`, not the WXT storage library.
+  The library adds about 4 KB gzip to each content script.
+- The in-page UI uses px units, because rem units follow the page's font size [19].
+- Plain CSS with custom properties for colors and spacing; no CSS framework.
+- No runtime dependencies besides Preact and `@preact/signals`.
+- Each entry point must stay under 30 KB after gzip.
+  CI checks this limit.
+  A test build with Preact had a 9.3 KB content script [19].
+- The package manager is npm.
+- Development and tests use Node 26.
+  Node 24 has no Temporal, and Node 26 enables it by default and becomes LTS in October 2026 [23].
+- The release build must also work on Node 24.14 and npm 11.9 on ARM64 Linux, which is the Firefox Add-ons reviewer setup [20].
+  The lockfile must include the ARM64 packages of the build tools.
+- ESLint with `typescript-eslint`, and Prettier.
+
+### 13. Testing and CI
+
+**Question:** How is the extension tested?
+
+**Decision:**
+
+1. **Live gate test, before any UI work:** With a signed-in student account, run reads and writes from the Chrome and Edge side panel, the Firefox sidebar and the background on each browser.
+   The writes are a done mark and a custom task.
+   It also checks that `sidePanel.close` works on Edge.
+   This decides the data owner (decision 11) and confirms the core design.
+   The test also checks the inferred facts:
+   - an override cannot be created again after a DELETE;
+   - whether Canvas resets a done mark when the teacher asks for a redo, for work on Canvas and outside it;
+   - whether the GraphQL request returns the names of teacher statuses;
+   - whether the assignments API and overrides still work under "Limited Access for Students";
+   - `GET /api/v1/planner/overrides` returns the expected data.
+2. **Unit tests:** Vitest with the WXT Vitest plugin and its fake browser [19].
+   - Canvas responses come from JSON fixtures with the real Canvas shape, served by MSW, as canvas-lms does in its own tests [19].
+   - Fixtures include a checkpoint course, Gradescope and on-paper work, a no-submission column, an extension, a teacher-set status, a redo request after a done mark, a locked item, a locked missing item, a Gradescope item past its lock date, a peer review due in a later week, a module "Mark as done" override with both flags true, a long-running course for the horizon cap, a mixed-role layout, the Limited Access 403, the rate-limit 403 and 429, and every UI state.
+   - Tests cover week math across time zones and daylight saving changes, the Saturday and Sunday week edges, the done rule, the placement rules in the current week and in past weeks, every status chip and availability marker, reminders, the undated-work rules, peer reviews placed on their real date, the term horizon and its 16-week cap, the Tomorrow look-ahead, the ring check mark and badge, the planner-off list, paging, the override sequence including the 400 recovery, Skip, and the CSRF header.
+   - Tests also cover a background restart while a panel is open, ten page-loaded messages in ten seconds (one refresh round), and the content script sync for both kinds of address.
+3. **Chromium end-to-end tests:** Playwright with the `chromium` channel, in headless mode [19].
+   - `context.route` serves a fake `https://school.instructure.com` with saved copies of the classic dashboard, the widget dashboard, a course home page and a mixed-role dashboard, plus the API [19].
+   - The tests open the panel page in a tab.
+   - One test opens the real side panel with `PW_CHROMIUM_ATTACH_TO_OTHER=1` [19].
+     Playwright cannot click the toolbar, so this test uses a test-only button on the panel page that calls `sidePanel.open`.
+     Release builds do not include it.
+   - The widget dashboard and List View fixtures must get no injected node.
+   - Screenshot tests run at 200 px, 240 px and 360 px.
+4. **Firefox smoke test:** Selenium with geckodriver, run with `--allow-system-access`.
+   Firefox 153 and later need this flag to open extension pages under geckodriver [19].
+   The test installs the extension and checks that the content script runs and the panel page loads.
+5. **Live checklist:** Before each release, a person runs a short checklist with a real student account on Chrome, Edge and Firefox.
+   It includes the first run, the welcome page and a custom-domain grant.
+6. **CI:** GitHub Actions on `ubuntu-24.04`, pinned because `ubuntu-latest` is moving to 26.04 [19].
+   The pipeline runs these steps:
+   - lint, type checks and unit tests;
+   - builds for all browsers, and a check that each built manifest has `manifest_version` 3, the expected permissions and `gecko.id`;
+   - the size check and `web-ext lint`;
+   - the Playwright tests and the Firefox smoke test;
+   - a rebuild of the Firefox source zip on the `ubuntu-24.04-arm` runner with Node 24.14 and npm 11.9, compared byte for byte with the release build [20].
+
+**Why:**
+
+- Canvas Free-for-Teacher is offline since May 2026 [19].
+- Canvas Lite requires an ID and selfie check for teachers [19].
+- Running canvas-lms in Docker needs 8 GB of memory, and its code stopped at April 2026 [19].
+- So CI uses fixtures, and a person runs the live checks.
+- Tests run with no retries.
+  A flaky test is a bug to fix.
+
+### 14. Browsers and versions
+
+**Question:** Which browsers and versions does version 1 support?
+
+**Decision:**
+
+- Chrome and Edge 144 or later.
+  Temporal needs 144 and `sidePanel.open` needs 116 [18].
+  `sidePanel.close` needs 141 [11].
+- Firefox 140 or later.
+  The data collection setting in the manifest needs 140 [20].
+- Desktop only.
+- Safari is out of scope.
+  It needs a Mac build and a paid Apple developer account.
+
+**Why:**
+
+- Firefox for Android has no sidebar, and Edge for Android has no side panel [11] [12].
+- On a phone, Canvas stacks the right column under the content [13].
+- A later version can add mobile support with the in-page list only.
+
+### 15. Publishing and privacy
+
+**Question:** How is the extension published, and what does it declare about data?
+
+**Decision:**
+
+- Publish the same version on the Chrome Web Store, Microsoft Edge Add-ons and Firefox Add-ons.
+- Host one privacy policy page on the project's GitHub Pages site.
+  - It says the extension reads Canvas data in the browser.
+  - It says the extension writes only done marks, skip marks and custom tasks, and only to the student's own Canvas.
+  - It says the extension stores only settings, the Canvas address, a change time stamp and which one-time notes were seen on the device.
+  - It says nothing goes anywhere else.
+  - It includes the Chrome Web Store Limited Use statement [20].
+- Chrome Web Store [20]:
+  - Single purpose: "Show your Canvas coursework for the week as a to-do list."
+  - Data usage: tick "Website content", and say the data is processed only on the device.
+    Chrome requires disclosure even when data stays on the device.
+  - Declare "non-trader".
+  - Turn on 2-Step Verification.
+- Firefox Add-ons [12] [20]:
+  - Set `gecko.id`.
+  - Set `data_collection_permissions` to `required: ["none"]`.
+    The reviewer notes explain that the only writes are done marks, skip marks and custom tasks, sent to the student's own Canvas at the student's request.
+  - Upload the source with a `build-for-amo` npm script and the lockfile.
+  - Turn on two-factor authentication.
+- Edge Add-ons [20]:
+  - Put the license link in the description.
+  - Do not mention other browsers in the Edge listing.
+  - Register in Partner Center early, because some individual developers report enrollment problems.
+- Every listing ends with: "Canvas is a trademark of Instructure, Inc. This independent project is not affiliated with or endorsed by Instructure." [20]
+- Reviewer account: a Canvas Lite course with sample work, and an invited student login for reviewers.
+  The owner must pass the Canvas Lite teacher ID check [19] [20].
+  Before the store step, check that the Canvas Lite planner, overrides and notes work.
+  If they do not, run canvas-lms from the April 2026 code on a small server with a custom domain during review periods.
+  That server also tests the custom-domain grant.
+
+**Why:**
+
+- All three stores require a privacy policy for an extension that handles user data [20].
+- Firefox Add-ons and Edge Add-ons require a working test login [20].
+- Other Canvas extensions on Firefox, such as Full Slate for Canvas and Canvas Refined, declare `none` [20].
+
+### 16. License
+
+**Question:** Which license should the project use?
+
+**Options:**
+
+- A. MIT.
+- B. MPL-2.0.
+- C. GPL-3.0.
+
+**Decision:** GPL-3.0-only.
+Contributions need a DCO sign-off and come in under the same license.
+
+**Why:**
+
+- The original was MIT, and its later store builds were never published as source [9] [20].
+- GPL-3.0 requires anyone who ships a build to offer the full source [20].
+- MPL-2.0 lets a fork keep new files closed [20].
+- Firefox Add-ons offers GPL-3.0 as a built-in license choice [20].
+- No store rule conflicts with GPL-3.0 [20].
+- The owner can relicense their own code.
+  Code from outside contributors can be relicensed only with their consent [20].
+  A CLA would keep that right, but it also discourages small contributions.
+  The project accepts this trade-off.
+- The README says the project name is not licensed under the GPL.
+  GPL-3.0 section 7(e) allows this [20].
+- The project does not copy code from Simple Canvas Tasks, which has no license [9].
+- Any code reused from the original Tasks for Canvas keeps its MIT notice [9].
+
+### 17. Name
+
+**Question:** What should the extension be called?
+
+**Options:** Twelve candidate names were checked on 2026-10-27 [21].
+Each check covered the Chrome, Firefox and Edge stores, the Apple and Google app stores, GitHub, the web, the USPTO and TMview.
+
+| Candidate | Result |
+|---|---|
+| Weekrow | Clear |
+| Septet | Minor conflict: marks in unrelated fields |
+| Heptad | Minor conflict: an iOS puzzle game |
+| Ringtide | Minor conflict: an AI voice company and two games |
+| Circlet | Minor conflict: registered marks for a medical ring and for school supplies |
+| Annulet | Minor conflict: a UK mark that covers software |
+| Weekfold | Conflict: an iOS weekly to-do app released 2026-10-26 |
+| Weekfill | Conflict: an iOS weekly goal tracker with no account |
+| Weekspan | Conflict: an open-source weekly to-do web app |
+| Weektide | Conflict: a planner app for Mac |
+| Sennight | Conflict: a GitHub week planner and Turkish marks |
+| Hushlist | Conflict: an iOS deadline app and a pending Benelux mark |
+
+**Decision:** Weekrow for Canvas.
+Septet for Canvas is the fallback.
+
+**Why:**
+
+- It is the only candidate with no product or mark of the same name in any source that was checked [21].
+- The domains weekrow.com, weekrow.app, weekrow.io and weekrow.co were not registered on 2026-10-27 [21].
+- It suggests one row of seven days, which is what the list shows.
+- It follows the naming rules below.
+
+**Rules:**
+
+- Use the form "<Name> for Canvas".
+- Do not start with "Canvas".
+  Instructure enforces its CANVAS trademark [20].
+- Do not use a name that contains "Tasks for Canvas".
+  Firefox Add-ons requires a fork to have a clearly different name, and Edge rejects names similar to other extensions [20].
+- "Simple-CanvasTasks" is too close to the live "Simple Canvas Tasks" [9].
+- "Weekboard" is already used by a weekly-planner web app (MyWeekBoard), a college homework planner on GitHub, a stationery brand and an iOS planner [22].
+
+**Follow-up actions for the owner:**
+
+1. Register weekrow.com.
+2. Rename the GitHub repository.
+3. Reserve the store listings soon, because new "Week" planner names appear often [21].
+4. Run a final name check just before the first release.
+
+**Remaining risk:** No full trademark clearance was done [21].
+"Weekrow" joins two plain words, so a trademark for it may be weak.
+
+### 18. Settings
+
+**Question:** Which settings does version 1 have?
+
+**Decision:** Four settings.
+
+| Setting | Default |
+|---|---|
+| First day of the week | Automatic, from the Canvas language |
+| Hidden courses | None, so all active student courses show |
+| Show progress rings | On |
+| Show Weekrow on Canvas pages | On |
+
+- "Hidden courses" is a list of the student's courses with a switch for each one, for example to hide a club or an orientation course.
+  - When any course is hidden, the list ends with one quiet line, such as "1 course hidden", with a link to the settings.
+  - So the student always knows that the list is filtered.
+- "Show Weekrow on Canvas pages" has one help line: "Shows on the Card View and Recent Activity dashboards and on course home pages. On other pages, use the side panel."
+- The settings page also shows the Canvas address, with a way to change it.
+
+**Why:**
+
+- The default shows every active course, because the Canvas planner itself returns work from every course.
+  An earlier draft used dashboard favorites, but students often leave favorites out of date, and the list would then drop a course with no sign.
+- The setting names describe what the student gets, not how the extension works.
+- There is no switch for undated work.
+  The No due date group starts collapsed, and Skip clears single items.
+
+**Left out from the original:** day, three-day and month views, the rolling view, list length, theme color, confetti, streaks, the Announcements tab, repeat-weekly custom tasks, Gradescope data, teacher mode and the 12-hour or 24-hour setting [9].
+
+### 19. Accessibility, language and theme
+
+**Decision:**
+
+- Meet WCAG 2.2 AA.
+- Every action works with the keyboard alone.
+- Each ring has a text label, such as "3 of 5 done".
+- Done marks are real checkboxes.
+- Animation stops when the system asks for reduced motion.
+- No control ever hides under the sticky header or the bottom notice (WCAG 2.4.11).
+  One-time notes show inline at the top of the list, so only the short Undo notice is sticky.
+- The in-page shadow host sets `lang="en"` and `dir="ltr"`, because the list is English even on a Canvas page in another language.
+- All UI text lives in `_locales/en/messages.json` from the start.
+  Version 1 ships in English only.
+- Dates and weekday names also show in English, so that one view never mixes two languages.
+  The Canvas language still sets the first day of the week and the 12-hour or 24-hour clock.
+- The side panel follows the system light or dark setting.
+- The in-page list follows the Canvas page.
+  It uses dark colors only when the page background is dark, as the original did [9].
+
+### 20. No-telemetry guarantee
+
+**Decision:**
+
+- All network calls go through one fetch wrapper.
+- The wrapper allows only the saved Canvas address.
+  During setup, it also allows the one candidate address being checked.
+  A unit test checks this.
+- A lint rule forbids `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource` and `navigator.sendBeacon` outside the wrapper.
+- The build turns off Vite's module preload polyfill, which calls `fetch` by itself.
+  A CI step fails when a built bundle other than the background contains a `fetch(` call.
+- A CI step scans the built bundles for URLs.
+  It allows a reviewed list of inert strings: XML namespace URIs, match patterns, and the project's repository and privacy policy links.
+  Preact and WXT put namespace strings into the bundles, so the list is needed [19].
+- No analytics, no error reporting and no remote configuration.
+- The welcome page is a local file inside the extension.
+  The extension opens no remote page on install or uninstall.
+
+**Why:**
+
+- The original's 2023 Firefox build already sent analytics and fetched remote configuration [9].
+- Both Chrome and Firefox reviewers compare the declared data use with the code [20].
+
+## Open risks
+
+These items need a live check or an outside answer.
+
+1. Signed-in reads and writes from the side panel and the background have not been tested in a running browser [11] [12].
+   The live gate test in decision 13 covers this.
+2. The public canvas-lms code stopped on 2026-04-30, so production Canvas may differ [10].
+3. How often a "Can't confirm" item was in fact handed in is unknown.
+   The Gradescope evidence is only a search summary [25].
+   The chip design works either way.
+4. The names of teacher statuses come from a GraphQL field found in source only [10].
+   If the live gate test fails, the chip falls back to the text "Teacher status".
+5. Canvas Lite may not support the planner for the reviewer account [19].
+6. Firefox Add-ons may decide that writes to Canvas count as data transmission [20].
+7. Chrome may ship the change that makes new installs ask before running on any site [15].
+8. The Instructure API Policy bans access through "technologies not approved by Instructure", but it does not say what that covers [20].
+9. The final name needs a full trademark clearance search [21].
+10. Instructure has not said whether the classic dashboard survives in the 2027 UI [13].
+
+## Build order
+
+1. Live gate test (decision 13, item 1).
+2. Data module with unit tests: requests, paging, the done rule, week math, placement and the status chips.
+3. Side panel UI: week list, rings, groups, chips, the task form and all UI states.
+4. Site access, the toolbar action and the first run.
+5. In-page adapters for the classic dashboard and course home pages.
+6. End-to-end tests and CI.
+7. Store listings, the privacy policy and the reviewer account.
+
+## Sources
+
+1. Tasks for Canvas 1.6.4, downloaded from the Chrome Web Store, unpacked and read on 2026-10-27, and its store listing. https://chromewebstore.google.com/detail/tasks-for-canvas/kabafodfnabokkkddjbnkgbcbmipdlmb
+2. Tasks for Canvas reviews on the Chrome Web Store. https://chromewebstore.google.com/detail/tasks-for-canvas/kabafodfnabokkkddjbnkgbcbmipdlmb/reviews
+3. Customizable Dashboard for Learners default-on announcement. https://community.instructure.com/en/discussion/666563/customizable-dashboard-for-learners-will-be-enabled-by-default-starting-august-15-2026
+4. Customizable Dashboard for Learners feature overview. https://community.instructure.com/en/discussion/665539/customizable-dashboard-for-learners-q2-2026-feature-overview
+5. How do I customize my Dashboard as a student. https://community.instructure.com/en/kb/articles/664424-how-do-i-customize-my-dashboard-as-a-student
+6. @instructure/platform-widget-dashboard 16.1.0 on npm, and the production Canvas widget registry. https://www.npmjs.com/package/@instructure/platform-widget-dashboard
+7. canvas-lms Submission model, missing logic. https://github.com/instructure/canvas-lms/blob/1c9f0bb8013ed69c4f2efe11fd483025469b7e6c/app/models/submission.rb
+8. What we shared at the October 2026 New and Next Showcase. https://community.instructure.com/en/discussion/667362/what-we-shared-at-the-october-2026-new-next-showcase
+9. Original Tasks for Canvas source (commit 774a0fc), its Firefox 1.3.2 package, and Simple Canvas Tasks source (commit 623a034). https://github.com/jtcheng26/canvas-task-extension and https://addons.mozilla.org/firefox/downloads/file/4180681/tasks_for_canvas-1.3.2.xpi and https://github.com/lucasloepke/canvas-tasks
+10. canvas-lms source at commit 1c9f0bb (planner, planner overrides, planner notes, assignments, users, groups, checkpoints, locales, authentication and throttling code), and the Canvas API docs. https://github.com/instructure/canvas-lms/tree/1c9f0bb8013ed69c4f2efe11fd483025469b7e6c and https://developerdocs.instructure.com/services/canvas
+11. Chromium cookie and side panel code, Chrome side panel docs, Edge side panel issues, and live CSRF tests on umich.instructure.com and canvas.uw.edu. https://github.com/chromium/chromium/blob/main/services/network/url_loader_util.cc and https://developer.chrome.com/docs/extensions/reference/api/sidePanel and https://github.com/microsoft/MicrosoftEdge-Extensions/issues
+12. Firefox cookie code, Firefox sidebar styles, MDN sidebar and permissions docs, and Mozilla bug reports. https://searchfox.org/mozilla-central/source/netwerk/cookie/CookieCommons.cpp and https://github.com/mozilla-firefox/firefox/blob/main/browser/themes/shared/sidebar.css and https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/sidebar_action and https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/sidebarAction
+13. canvas-lms dashboard views and layout styles, and production Canvas bundles from canvas.uw.edu. https://github.com/instructure/canvas-lms/blob/master/app/views/users/dashboard_sidebar.html.erb and https://github.com/instructure/canvas-lms/blob/master/app/stylesheets/base/_ic_app_layout.scss
+14. Chromium bug 415694848, side panel open from a content script click. https://issues.chromium.org/issues/415694848
+15. Chrome permission warnings and permissions API docs, the Instructure school directory, and Chromium site access commits from October 2026. https://developer.chrome.com/docs/extensions/reference/api/permissions and https://piunikaweb.com/2026/10/06/chrome-testing-change-extensions-site-access-default/
+16. Chrome Web Store review process. https://developer.chrome.com/docs/webstore/review-process
+17. Canvas Planner API docs, List planner overrides. https://canvas.instructure.com/doc/api/planner.html
+18. MDN browser compatibility data 8.1.7, Temporal and sidePanel entries. https://github.com/mdn/browser-compat-data
+19. WXT, Playwright, Selenium and framework size tests run on 2026-10-27, and Canvas Lite and Free-for-Teacher status. https://wxt.dev and https://playwright.dev/docs/chrome-extensions and https://www.instructure.com/resources/blog/say-hello-canvas-lite
+20. Chrome Web Store, Firefox Add-ons and Edge Add-ons policies, Instructure brand and API policies, and the MIT, MPL-2.0 and GPL-3.0 licenses. https://developer.chrome.com/docs/webstore/program-policies and https://extensionworkshop.com/documentation/publish/add-on-policies/ and https://learn.microsoft.com/en-us/microsoft-edge/extensions/store-policies/developer-policies and https://www.instructure.com/policies/canvas-api-policy and https://www.gnu.org/licenses/gpl-3.0.html
+21. Name collision checks for twelve candidates on 2026-10-27, using the store search APIs, the iTunes Search API, GitHub, RDAP, the USPTO trademark search API and TMview. https://tmsearch.uspto.gov and https://www.tmdn.org/tmview
+22. Name search for "Weekboard". https://www.myweekboard.com and https://github.com/Ksenia-glitch/weekboard and https://www.amazon.de/-/en/weekBoard-Weekview-Planner-International-Version/dp/B078Y6G2Y7 and https://apps.apple.com/kr/app/weekboard-weekly-planner/id6775522975
+23. Node.js 26.0.0 release notes. https://nodejs.org/en/blog/release/v26.0.0
+24. Chrome runtime and scripting API docs, the Chrome extension service worker lifecycle docs, and MDN runtime.sendMessage and scripting docs. https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle and https://developer.chrome.com/docs/extensions/reference/api/runtime#method-sendMessage and https://developer.chrome.com/docs/extensions/reference/api/scripting and https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/runtime/sendMessage
+25. Gradescope instructor guide on posting grades to Canvas, seen only as a search result summary because a direct fetch returned 403. https://guides.gradescope.com
