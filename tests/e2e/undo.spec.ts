@@ -1,0 +1,150 @@
+/**
+ * The Undo notice (design decisions 6 and 10). It has no timer: it stays until the student acts
+ * again, closes it, or the surface goes away. Ctrl+Z undoes while it shows. A task DELETE goes
+ * out only when the notice ends.
+ */
+import type { BrowserContext, Locator, Page, Worker } from '@playwright/test';
+import { IDS } from '../fixtures/scenario';
+import { overrideWrites, writesTo } from './support/canvas-state';
+import { saveAddress } from './support/scenario-api';
+import {
+  addCsrfCookie,
+  doneBox,
+  expect,
+  group,
+  openExtensionPage,
+  serveScenario,
+  settledList,
+  test,
+  type ServedCanvas,
+} from './support/weekrow';
+
+const NOTES = IDS.notes;
+const QUIZ_3 = 'Quiz 3: Cell membranes';
+/** Far longer than any notice timer would be. */
+const LONG_WAIT = '10:00';
+
+/**
+ * Opens the panel page with a fake clock, so the test can move the page's time forward. The
+ * background keeps its own clock, so its two-minute cap on a delayed delete does not pass.
+ */
+async function openPanel(
+  context: BrowserContext,
+  page: Page,
+  background: Worker,
+  url: string,
+): Promise<ServedCanvas> {
+  const served = await serveScenario(context);
+  await addCsrfCookie(context, served.canvas.origin);
+  await saveAddress(background, served.canvas.origin);
+  await page.clock.install();
+  await openExtensionPage(page, url);
+  await expect(doneBox(page, QUIZ_3)).toBeVisible();
+  await settledList(page);
+  return served;
+}
+
+function editButton(scope: Page | Locator, title: string): Locator {
+  return scope.getByRole('button', { name: `Edit task: ${title}`, exact: true });
+}
+
+async function deleteTask(page: Page, scope: Locator, title: string): Promise<void> {
+  await editButton(scope, title).click();
+  await page.getByRole('button', { name: 'Delete task' }).click();
+  await expect(editButton(scope, title)).toHaveCount(0);
+}
+
+test.describe('the Undo notice', () => {
+  test('stays with no timer, and Ctrl+Z undoes a done mark', async ({
+    context,
+    page,
+    background,
+    extensionUrl,
+  }) => {
+    const { canvas } = await openPanel(context, page, background, extensionUrl('sidepanel.html'));
+    const toast = page.locator('.wr-toast');
+    const today = group(page, 'today');
+    const quiz = doneBox(today, QUIZ_3);
+
+    // The item moves to the collapsed Done group at once.
+    await quiz.click();
+    await expect(quiz).toHaveCount(0);
+    await expect(toast).toContainText('Marked done');
+    await expect.poll(() => overrideWrites(canvas)).toHaveLength(1);
+
+    await page.clock.fastForward(LONG_WAIT);
+    await expect(toast).toContainText('Marked done');
+    await expect(toast.getByRole('button', { name: 'Undo' })).toHaveAttribute(
+      'aria-keyshortcuts',
+      'Control+Z Meta+Z',
+    );
+
+    await page.keyboard.press('Control+z');
+
+    await expect(toast).toHaveCount(0);
+    await expect(quiz).not.toBeChecked();
+    await expect.poll(() => overrideWrites(canvas)).toHaveLength(2);
+    expect(overrideWrites(canvas)[1]).toMatchObject({
+      method: 'PUT',
+      body: { marked_complete: false, dismissed: false },
+    });
+    // With no notice, Ctrl+Z does nothing.
+    await page.keyboard.press('Control+z');
+    await expect(quiz).not.toBeChecked();
+    expect(overrideWrites(canvas)).toHaveLength(2);
+  });
+
+  test('sends a task DELETE only when the notice ends, and never after Ctrl+Z', async ({
+    context,
+    page,
+    background,
+    extensionUrl,
+  }) => {
+    const { canvas, state } = await openPanel(
+      context,
+      page,
+      background,
+      extensionUrl('sidepanel.html'),
+    );
+    const toast = page.locator('.wr-toast');
+    const today = group(page, 'today');
+    const tomorrow = group(page, 'tomorrow');
+    const pastDue = group(page, 'past_due');
+    const deletes = () => writesTo(canvas, 'DELETE', '/api/v1/planner_notes').map((w) => w.path);
+
+    // 1. The notice stays, and the task stays in Canvas while it shows.
+    await deleteTask(page, today, 'Return library books');
+    await expect(toast).toContainText('Task deleted');
+    await page.clock.fastForward(LONG_WAIT);
+    await expect(toast).toContainText('Task deleted');
+    expect(deletes()).toEqual([]);
+
+    // 2. The student acts again: the notice ends, and the DELETE goes out.
+    await doneBox(today, QUIZ_3).click();
+    await expect(toast).toContainText('Marked done');
+    await expect.poll(deletes).toEqual([`/api/v1/planner_notes/${NOTES.libraryBooksToday}`]);
+
+    // 3. Ctrl+Z on a delete brings the task back, and no DELETE goes out for it.
+    await deleteTask(page, tomorrow, 'Study group for BIO midterm');
+    await expect(toast).toContainText('Task deleted');
+    await page.keyboard.press('Control+z');
+    await expect(editButton(tomorrow, 'Study group for BIO midterm')).toBeVisible();
+    await expect(toast).toHaveCount(0);
+
+    // 4. The panel closes with a notice open: the DELETE goes out then.
+    await deleteTask(page, pastDue, 'Call financial aid office');
+    await expect(toast).toContainText('Task deleted');
+    expect(deletes()).toHaveLength(1);
+    await page.close();
+
+    await expect
+      .poll(deletes)
+      .toEqual([
+        `/api/v1/planner_notes/${NOTES.libraryBooksToday}`,
+        `/api/v1/planner_notes/${NOTES.financialAidYesterday}`,
+      ]);
+    expect(state.note(NOTES.bioStudyGroup)?.deleted).toBe(false);
+    expect(state.note(NOTES.libraryBooksToday)?.deleted).toBe(true);
+    expect(state.note(NOTES.financialAidYesterday)?.deleted).toBe(true);
+  });
+});

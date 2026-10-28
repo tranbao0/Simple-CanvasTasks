@@ -1,0 +1,137 @@
+/**
+ * Keeps keyboard focus in the surface when an update removes the focused control.
+ *
+ * - A row, for example after a done mark moves an item into the collapsed Done group:
+ *   focus moves to the same control of the next row, or of the previous row.
+ * - "Skip all older", which goes away when the older list empties: focus moves to the Past due
+ *   heading, or to the first row.
+ * - Any other control, such as a button of the Undo notice: focus moves to the control that the
+ *   caller names, such as the control the student used last.
+ */
+
+export type FocusSnapshot =
+  | {
+      kind: 'row';
+      key: string;
+      /** `data-part` of the focused control, such as `check` or `skip`. */
+      part: string | null;
+      /** Row keys in document order before the update. */
+      order: string[];
+    }
+  | {
+      kind: 'control';
+      /** `data-part` of the focused control, or `null` when it has none. */
+      part: string | null;
+    };
+
+const ROW = '[data-row-key]';
+
+/** The Past due heading, which takes focus when "Skip all older" goes away. */
+export const PAST_DUE_HEADING = '[data-group="past_due"] [data-part="group-head"]';
+
+/** The focused element in the document or shadow root of `root`. */
+export function activeElementIn(root: HTMLElement): Element | null {
+  const owner = root.getRootNode() as Document | ShadowRoot;
+  return owner.activeElement;
+}
+
+/** Whether focus is on `root` or inside it. */
+export function hasFocusIn(root: HTMLElement | null): boolean {
+  if (!root) return false;
+  const active = activeElementIn(root);
+  return active !== null && root.contains(active);
+}
+
+function rowsOf(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(ROW));
+}
+
+function partOf(element: Element): string | null {
+  return element.closest<HTMLElement>('[data-part]')?.dataset.part ?? null;
+}
+
+/** Records the focused control. Returns `null` when focus is not in `root`. */
+export function captureFocus(root: HTMLElement | null): FocusSnapshot | null {
+  if (!root) return null;
+  const active = activeElementIn(root);
+  if (!active || !root.contains(active) || active === root) return null;
+  const row = active.closest<HTMLElement>(ROW);
+  const key = row?.dataset.rowKey;
+  if (!row || key === undefined) return { kind: 'control', part: partOf(active) };
+  return {
+    kind: 'row',
+    key,
+    part: partOf(active),
+    order: rowsOf(root).map((el) => el.dataset.rowKey ?? ''),
+  };
+}
+
+function isDisabled(element: HTMLElement): boolean {
+  return (element as HTMLInputElement).disabled === true;
+}
+
+function focusable(row: HTMLElement, part: string | null): HTMLElement | null {
+  const selectors = [
+    part ? `[data-part="${part}"]` : null,
+    '[data-part="check"]',
+    '[data-part="title"]',
+  ];
+  for (const selector of selectors) {
+    if (!selector) continue;
+    const el = row.querySelector<HTMLElement>(selector);
+    if (el && !isDisabled(el)) return el;
+  }
+  return null;
+}
+
+/** The first control of the first row, or `null` when the list has no rows. */
+export function firstRowControl(root: HTMLElement): HTMLElement | null {
+  for (const row of rowsOf(root)) {
+    const target = focusable(row, null);
+    if (target) return target;
+  }
+  return null;
+}
+
+/** `element` when it can still take focus in `root`, otherwise `null`. */
+export function usable(root: HTMLElement, element: HTMLElement | null): HTMLElement | null {
+  if (!element || !element.isConnected || !root.contains(element) || isDisabled(element))
+    return null;
+  return element;
+}
+
+function rowTarget(
+  root: HTMLElement,
+  snapshot: Extract<FocusSnapshot, { kind: 'row' }>,
+): HTMLElement | null {
+  const rows = new Map(rowsOf(root).map((el) => [el.dataset.rowKey ?? '', el]));
+  const index = snapshot.order.indexOf(snapshot.key);
+  const candidates = [
+    ...snapshot.order.slice(index + 1),
+    ...snapshot.order.slice(0, index).reverse(),
+  ];
+  for (const key of candidates) {
+    const row = rows.get(key);
+    const target = row ? focusable(row, snapshot.part) : null;
+    if (target) return target;
+  }
+  return null;
+}
+
+/**
+ * After an update: if focus was in `root` and fell out of it, move it to a sensible control.
+ * `fallback` names the control for a focused control that went away and has no rule of its own.
+ */
+export function restoreFocus(
+  root: HTMLElement | null,
+  snapshot: FocusSnapshot | null,
+  fallback: () => HTMLElement | null = () => null,
+): void {
+  if (!root || !snapshot || hasFocusIn(root)) return;
+  let target: HTMLElement | null;
+  if (snapshot.kind === 'row') target = rowTarget(root, snapshot) ?? fallback();
+  else if (snapshot.part === 'skip-older')
+    target = root.querySelector<HTMLElement>(PAST_DUE_HEADING) ?? firstRowControl(root);
+  else target = fallback();
+  target?.focus();
+}

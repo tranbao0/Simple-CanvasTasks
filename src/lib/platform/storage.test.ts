@@ -1,0 +1,144 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { fakeBrowser } from 'wxt/testing/fake-browser';
+import { DEFAULT_SETTINGS } from '../model/types';
+import {
+  DEFAULT_SEEN_NOTES,
+  canvasOriginItem,
+  changeMarkerItem,
+  defineItem,
+  offerItem,
+  seenNotesItem,
+  settingsItem,
+  watchItems,
+} from './storage';
+
+beforeEach(() => {
+  fakeBrowser.reset();
+});
+
+describe('storage items', () => {
+  it('gives the defaults before anything is stored', async () => {
+    expect(await settingsItem.getValue()).toEqual(DEFAULT_SETTINGS);
+    expect(await canvasOriginItem.getValue()).toBeNull();
+    expect(await changeMarkerItem.getValue()).toBe(0);
+    expect(await seenNotesItem.getValue()).toEqual(DEFAULT_SEEN_NOTES);
+    expect(await offerItem.getValue()).toBeNull();
+  });
+
+  it('keeps the settings, address, marker and notes in storage.local', async () => {
+    const settings = { ...DEFAULT_SETTINGS, showRings: false, hiddenCourseIds: ['7'] };
+    await settingsItem.setValue(settings);
+    await canvasOriginItem.setValue('https://canvas.school.edu');
+    await changeMarkerItem.setValue(1_700_000_000_000);
+    await seenNotesItem.setValue({ firstDone: true, firstSkip: false });
+
+    expect(await fakeBrowser.storage.local.get(null)).toEqual({
+      settings,
+      canvasOrigin: 'https://canvas.school.edu',
+      changeMarker: 1_700_000_000_000,
+      seenNotes: { firstDone: true, firstSkip: false },
+    });
+  });
+
+  it('keeps the offer in storage.session only', async () => {
+    await offerItem.setValue({ origin: 'https://school.instructure.com', mode: 'use' });
+
+    expect(await fakeBrowser.storage.session.get('offer')).toEqual({
+      offer: { origin: 'https://school.instructure.com', mode: 'use' },
+    });
+    expect(await fakeBrowser.storage.local.get(null)).toEqual({});
+  });
+
+  it('removes the address when it is set to null', async () => {
+    await canvasOriginItem.setValue('https://canvas.school.edu');
+    await canvasOriginItem.setValue(null);
+
+    expect(await canvasOriginItem.getValue()).toBeNull();
+    expect(await fakeBrowser.storage.local.get(null)).toEqual({});
+  });
+
+  it('does not share the default objects between reads', async () => {
+    const first = await seenNotesItem.getValue();
+    first.firstDone = true;
+
+    expect(await seenNotesItem.getValue()).toEqual({ firstDone: false, firstSkip: false });
+    expect(DEFAULT_SEEN_NOTES).toEqual({ firstDone: false, firstSkip: false });
+  });
+});
+
+describe('settings defaults', () => {
+  it('gives each read its own copy of the default settings', async () => {
+    const first = await settingsItem.getValue();
+    first.hiddenCourseIds.push('9');
+    first.showRings = false;
+
+    expect(await settingsItem.getValue()).toEqual({
+      weekStart: 'auto',
+      hiddenCourseIds: [],
+      showRings: true,
+      showOnCanvasPages: true,
+    });
+    expect(DEFAULT_SETTINGS.hiddenCourseIds).toEqual([]);
+  });
+});
+
+describe('defineItem', () => {
+  it('reads and writes the key without the area prefix', async () => {
+    const item = defineItem<string | null>('session:example', () => null);
+
+    await item.setValue('a');
+    expect(await fakeBrowser.storage.session.get(null)).toEqual({ example: 'a' });
+    expect(item.area).toBe('session');
+    expect(item.key).toBe('example');
+
+    await item.removeValue();
+    expect(await item.getValue()).toBeNull();
+    expect(await fakeBrowser.storage.session.get(null)).toEqual({});
+  });
+
+  it('calls a watcher with the new and old values, and the fallback for a removed value', async () => {
+    const listener = vi.fn();
+    const stop = changeMarkerItem.watch(listener);
+
+    await changeMarkerItem.setValue(5);
+    await changeMarkerItem.setValue(8);
+    await changeMarkerItem.removeValue();
+
+    expect(listener.mock.calls).toEqual([
+      [5, 0],
+      [8, 5],
+      [0, 8],
+    ]);
+    stop();
+    await changeMarkerItem.setValue(9);
+    expect(listener).toHaveBeenCalledTimes(3);
+  });
+
+  it('ignores other areas, other keys and writes of an equal value', async () => {
+    const listener = vi.fn();
+    const stop = settingsItem.watch(listener);
+
+    await fakeBrowser.storage.session.set({ settings: { ...DEFAULT_SETTINGS, showRings: false } });
+    await seenNotesItem.setValue({ firstDone: true, firstSkip: false });
+    await settingsItem.setValue({ ...DEFAULT_SETTINGS });
+    await settingsItem.setValue({ ...DEFAULT_SETTINGS });
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledWith(DEFAULT_SETTINGS, DEFAULT_SETTINGS);
+    stop();
+  });
+
+  it('calls one listener for changes of any watched item', async () => {
+    const listener = vi.fn();
+    const stop = watchItems([changeMarkerItem, offerItem], listener);
+
+    await changeMarkerItem.setValue(3);
+    await offerItem.setValue({ origin: 'https://school.instructure.com', mode: 'use' });
+    await seenNotesItem.setValue({ firstDone: true, firstSkip: true });
+
+    expect(listener).toHaveBeenCalledTimes(2);
+    stop();
+    await changeMarkerItem.setValue(4);
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+});

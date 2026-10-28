@@ -1,0 +1,15 @@
+# Build output and generated files
+.output/
+.wxt/
+node_modules/
+coverage/
+playwright-report/
+test-results/
+web-ext-artifacts/
+package-lock.json
+
+# Saved copies of Canvas pages keep their original markup
+tests/fixtures/pages/
+
+# Docs are formatted by hand, one sentence per line
+docs/

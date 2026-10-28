@@ -1,0 +1,252 @@
+import { chunk, unique, uniqueBy } from './batch';
+import { isJsonObject } from './classify';
+import {
+  customGradeStatusesQuery,
+  GRAPHQL_PATH,
+  MAX_GRAPHQL_ALIASES,
+  readCustomGradeStatuses,
+} from './graphql';
+import {
+  createCanvasTransport,
+  resolveOnOrigin,
+  toCanvasOrigin,
+  type CanvasRequest,
+  type CanvasResponse,
+  type HttpMethod,
+} from './http';
+import { createLimiter } from './limiter';
+import { findNextLink } from './paging';
+import { withRateLimitRetry } from './retry';
+import {
+  CanvasError,
+  type Assignment,
+  type CanvasApi,
+  type CanvasClientOptions,
+  type Colors,
+  type Course,
+  type CustomGradeStatus,
+  type DashboardPositions,
+  type Group,
+  type NoteInput,
+  type PlannerItem,
+  type PlannerNote,
+  type PlannerOverride,
+  type Profile,
+  type UserSelf,
+} from './types';
+
+export const DEFAULT_MAX_CONCURRENCY = 3;
+export const PER_PAGE = 100;
+/** Canvas rejects more ids, and `per_page` must be at least the number of ids. */
+export const MAX_ASSIGNMENT_IDS_PER_REQUEST = 100;
+
+type QueryParam = readonly [name: string, value: string | number | boolean];
+
+/** Builds a path with query parameters. Repeated names, such as `include[]`, stay in order. */
+export function apiUrl(path: string, params: readonly QueryParam[] = []): string {
+  const search = new URLSearchParams(
+    params.map(([name, value]) => [name, String(value)]),
+  ).toString();
+  return search ? `${path}?${search}` : path;
+}
+
+const CANVAS_ID = /^\d+(~\d+)?$/;
+
+/** Checks an id before it goes into a URL path. */
+function pathId(id: string): string {
+  if (!CANVAS_ID.test(id)) {
+    throw new CanvasError('bad_request', `Not a Canvas id: ${JSON.stringify(id)}`);
+  }
+  return id;
+}
+
+/**
+ * The client checks only the top-level JSON shape. It trusts Canvas for the fields
+ * inside, as declared in `types.ts`.
+ */
+function expectObject<T>(data: unknown, url: string): T {
+  if (!isJsonObject(data)) {
+    throw new CanvasError('not_canvas', `Expected a JSON object from ${url}`);
+  }
+  return data as T;
+}
+
+function expectArray<T>(data: unknown, url: string): T[] {
+  if (!Array.isArray(data)) throw new CanvasError('not_canvas', `Expected a JSON list from ${url}`);
+  return data as T[];
+}
+
+function noteBody(input: NoteInput): Record<string, string | null> {
+  return {
+    title: input.title,
+    details: input.details ?? null,
+    todo_date: input.todoDate,
+    course_id: input.courseId ?? null,
+  };
+}
+
+function assignmentsPath(courseId: string): string {
+  return `/api/v1/courses/${pathId(courseId)}/assignments`;
+}
+
+/**
+ * Creates the Canvas client. All requests share one queue with at most `maxConcurrency`
+ * requests in flight, and each request retries on a rate limit.
+ */
+export function createCanvasClient(options: CanvasClientOptions): CanvasApi {
+  const origin = toCanvasOrigin(options.origin);
+  const transport = createCanvasTransport({
+    origin,
+    getCsrfToken: options.getCsrfToken,
+    fetchImpl: options.fetchImpl,
+  });
+  const limit = createLimiter(options.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY);
+
+  const send = (request: CanvasRequest): Promise<CanvasResponse> =>
+    limit(() => withRateLimitRetry(() => transport(request)));
+
+  const getObject = async <T>(url: string): Promise<T> =>
+    expectObject<T>((await send({ method: 'GET', url })).data, url);
+
+  /** Follows `Link: rel="next"` to the last page. A repeated page ends the list. */
+  const getAll = async <T>(firstUrl: string): Promise<T[]> => {
+    const items: T[] = [];
+    const visited = new Set<string>();
+    let url: string | null = firstUrl;
+    while (url !== null) {
+      const key = resolveOnOrigin(origin, url).href;
+      if (visited.has(key)) break;
+      visited.add(key);
+      const page = await send({ method: 'GET', url });
+      items.push(...expectArray<T>(page.data, url));
+      url = findNextLink(page.link);
+    }
+    return items;
+  };
+
+  const write = async <T>(
+    method: Exclude<HttpMethod, 'GET'>,
+    url: string,
+    body: unknown,
+  ): Promise<T> => expectObject<T>((await send({ method, url, body })).data, url);
+
+  const listAssignmentBatch = (courseId: string, ids: readonly string[]): Promise<Assignment[]> =>
+    getAll<Assignment>(
+      apiUrl(assignmentsPath(courseId), [
+        ...ids.map((id): QueryParam => ['assignment_ids[]', id]),
+        ['include[]', 'submission'],
+        ['per_page', Math.max(PER_PAGE, ids.length)],
+      ]),
+    );
+
+  const listStatusBatch = async (
+    courseIds: readonly string[],
+  ): Promise<Record<string, CustomGradeStatus[]>> => {
+    const response = await send({
+      method: 'POST',
+      url: GRAPHQL_PATH,
+      body: customGradeStatusesQuery(courseIds),
+    });
+    return readCustomGradeStatuses(courseIds, response.data);
+  };
+
+  return {
+    origin,
+
+    getSelf: async () => getObject<UserSelf>('/api/v1/users/self'),
+
+    getProfile: async () => getObject<Profile>('/api/v1/users/self/profile'),
+
+    listCourses: async () =>
+      getAll<Course>(
+        apiUrl('/api/v1/courses', [
+          ['enrollment_state', 'active'],
+          ['enrollment_type', 'student'],
+          ['include[]', 'term'],
+          ['per_page', PER_PAGE],
+        ]),
+      ),
+
+    listGroups: async () =>
+      getAll<Group>(apiUrl('/api/v1/users/self/groups', [['per_page', PER_PAGE]])),
+
+    getColors: async () => getObject<Colors>('/api/v1/users/self/colors'),
+
+    getDashboardPositions: async () =>
+      getObject<DashboardPositions>('/api/v1/users/self/dashboard_positions'),
+
+    listPlannerItems: async (range) =>
+      getAll<PlannerItem>(
+        apiUrl('/api/v1/planner/items', [
+          ['start_date', range.start],
+          ['end_date', range.end],
+          ['per_page', PER_PAGE],
+        ]),
+      ),
+
+    listAssignmentsByIds: async (courseId, assignmentIds) => {
+      const batches = chunk(unique(assignmentIds), MAX_ASSIGNMENT_IDS_PER_REQUEST);
+      const results = await Promise.all(batches.map((ids) => listAssignmentBatch(courseId, ids)));
+      return results.flat();
+    },
+
+    // `include[]=checkpoints` makes Canvas send `has_sub_assignments`, so the model can drop
+    // checkpointed discussions, whose parent assignment has no due date.
+    listUndatedAssignments: async (courseId) =>
+      getAll<Assignment>(
+        apiUrl(assignmentsPath(courseId), [
+          ['bucket', 'undated'],
+          ['include[]', 'submission'],
+          ['include[]', 'checkpoints'],
+          ['exclude_checkpoints', true],
+          ['per_page', PER_PAGE],
+        ]),
+      ),
+
+    listAllAssignments: async (courseId) =>
+      getAll<Assignment>(
+        apiUrl(assignmentsPath(courseId), [
+          ['include[]', 'submission'],
+          ['include[]', 'checkpoints'],
+          ['per_page', PER_PAGE],
+        ]),
+      ),
+
+    listPlannerOverrides: async () => {
+      const overrides = await getAll<PlannerOverride>(
+        apiUrl('/api/v1/planner/overrides', [['per_page', PER_PAGE]]),
+      );
+      return uniqueBy(overrides, (override) => override.id);
+    },
+
+    listCustomGradeStatuses: async (courseIds) => {
+      const batches = chunk(unique(courseIds), MAX_GRAPHQL_ALIASES);
+      const results = await Promise.all(batches.map(listStatusBatch));
+      return Object.fromEntries(results.flatMap((result) => Object.entries(result)));
+    },
+
+    createOverride: async (input) =>
+      write<PlannerOverride>('POST', '/api/v1/planner/overrides', {
+        plannable_type: input.plannableType,
+        plannable_id: input.plannableId,
+        marked_complete: input.markedComplete,
+        dismissed: input.dismissed,
+      }),
+
+    updateOverride: async (id, input) =>
+      write<PlannerOverride>('PUT', `/api/v1/planner/overrides/${pathId(id)}`, {
+        marked_complete: input.markedComplete,
+        dismissed: input.dismissed,
+      }),
+
+    createNote: async (input) =>
+      write<PlannerNote>('POST', '/api/v1/planner_notes', noteBody(input)),
+
+    updateNote: async (id, input) =>
+      write<PlannerNote>('PUT', `/api/v1/planner_notes/${pathId(id)}`, noteBody(input)),
+
+    deleteNote: async (id) => {
+      await send({ method: 'DELETE', url: `/api/v1/planner_notes/${pathId(id)}` });
+    },
+  };
+}
