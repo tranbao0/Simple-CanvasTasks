@@ -2,9 +2,13 @@
  * One refresh round: which Canvas requests to send, and how their answers update the cache.
  * See docs/design.md, decision 11, "Requests" and "Request rules".
  *
- * - `ensure` loads only what a view needs and the cache lacks.
- * - `light` also reloads the planner items: one range that covers every view in use.
- * - `full` also reloads the assignment details, the undated work and the override list.
+ * - `ensure` loads only what the views in use need and the cache lacks, except planner items:
+ *   the data owner loads the planner gaps of a view itself, so a new week never waits behind a
+ *   round.
+ * - `light` also reloads the planner items of the current-week view, from the past-due horizon
+ *   on, in chunks that load side by side.
+ * - `full` also reloads the assignment details of those items, the undated work and the
+ *   override list.
  *
  * Light and full rounds also ask `GET /api/v1/users/self`, in parallel with the planner. When
  * another user is signed in, the round fails with `UserChangedError`, so the owner can drop
@@ -22,16 +26,20 @@ import type {
   UserSelf,
 } from '../canvas/types';
 import { assignmentIdsToLookup } from '../model';
+import type { RoundScope, SessionCache, SessionData } from './cache';
 import {
-  coveringEntry,
-  rangeCovers,
-  rangeKey,
-  spanOf,
-  type PlannerEntry,
-  type RoundScope,
-  type SessionCache,
-  type SessionData,
-} from './cache';
+  chunkInterval,
+  coveredItems,
+  emptyCoverage,
+  isCovered,
+  itemTimes,
+  mergeFetched,
+  toInterval,
+  toRange,
+  type FetchedPart,
+  type Interval,
+  type PlannerCoverage,
+} from './coverage';
 import { isCanvasError, isCourseScoped, isOutageError } from './failures';
 
 export type RoundKind = 'ensure' | RoundScope;
@@ -52,10 +60,8 @@ export const skipKey = {
   statuses: (courseId: string) => `statuses:${courseId}`,
 } as const;
 
-/** What a view still needs from Canvas. */
+/** What the views in use still need from Canvas, besides planner items. */
 export interface Needs {
-  /** Planner ranges with no cached items. Always empty in limited mode. */
-  ranges: TimeRange[];
   /** Assignment ids with no cached details, by course. */
   detailIds: Record<string, string[]>;
   undatedCourses: string[];
@@ -71,34 +77,39 @@ export interface NeedsInput {
   ranges: readonly TimeRange[];
   visibleCourseIds: readonly string[];
   hiddenCourseIds: readonly string[];
+  /** Assignment ids whose details another load is fetching now. */
+  detailsInFlight?: ReadonlySet<string>;
 }
 
-/** The items of the entries that cover the ranges, each entry once. */
-function itemsOf(
-  planner: Readonly<Record<string, PlannerEntry>>,
+/** The planner items whose own date falls in one of the ranges. */
+export function itemsInRanges(
+  coverage: Pick<PlannerCoverage, 'items'>,
   ranges: readonly TimeRange[],
 ): PlannerItem[] {
-  const entries = new Set<PlannerEntry>();
-  for (const range of ranges) {
-    const entry = coveringEntry(planner, range);
-    if (entry !== null) entries.add(entry);
-  }
-  return [...entries].flatMap((entry) => entry.items);
+  const intervals = ranges.map(toInterval);
+  return coveredItems(coverage).filter((item) => {
+    const time = Date.parse(item.plannable_date);
+    return intervals.some((interval) => time >= interval.start && time < interval.end);
+  });
 }
 
 function isSkipped(cache: Pick<SessionCache, 'skipped'>, key: string): boolean {
   return cache.skipped.includes(key);
 }
 
-/** Lookup ids that have no cached details and did not fail this round. */
+/** Lookup ids that have no cached details, did not fail this round and are not on their way. */
 export function missingDetailIds(
   lookup: Readonly<Record<string, string[]>>,
   cache: Pick<SessionCache, 'details' | 'skipped'>,
+  inFlight: ReadonlySet<string> = new Set(),
 ): Record<string, string[]> {
   const result: Record<string, string[]> = {};
   for (const [courseId, ids] of Object.entries(lookup)) {
     const missing = ids.filter(
-      (id) => cache.details[id] === undefined && !isSkipped(cache, skipKey.details(id)),
+      (id) =>
+        cache.details[id] === undefined &&
+        !inFlight.has(id) &&
+        !isSkipped(cache, skipKey.details(id)),
     );
     if (missing.length > 0) result[courseId] = missing;
   }
@@ -157,7 +168,6 @@ export function needsFor(input: NeedsInput): Needs {
   const { cache, ranges, visibleCourseIds, hiddenCourseIds } = input;
   if (cache.limited) {
     return {
-      ranges: [],
       detailIds: {},
       undatedCourses: [],
       overrides: cache.overrides === null,
@@ -165,13 +175,9 @@ export function needsFor(input: NeedsInput): Needs {
       statusCourses: statusCoursesNeeded(cache, visibleCourseIds),
     };
   }
-  const missingRanges = uniqueRanges(ranges).filter(
-    (range) => coveringEntry(cache.planner, range) === null,
-  );
-  const lookup = assignmentIdsToLookup(itemsOf(cache.planner, ranges), hiddenCourseIds);
+  const lookup = assignmentIdsToLookup(itemsInRanges(cache.planner, ranges), hiddenCourseIds);
   return {
-    ranges: missingRanges,
-    detailIds: missingDetailIds(lookup, cache),
+    detailIds: missingDetailIds(lookup, cache, input.detailsInFlight),
     undatedCourses: missingCourses(visibleCourseIds, cache.undated, cache, skipKey.undated),
     overrides: cache.overrides === null && overridesNeeded(false, cache.undated, visibleCourseIds),
     allCourses: [],
@@ -181,7 +187,6 @@ export function needsFor(input: NeedsInput): Needs {
 
 export function hasNeeds(needs: Needs): boolean {
   return (
-    needs.ranges.length > 0 ||
     Object.keys(needs.detailIds).length > 0 ||
     needs.undatedCourses.length > 0 ||
     needs.overrides ||
@@ -190,15 +195,18 @@ export function hasNeeds(needs: Needs): boolean {
   );
 }
 
-export function uniqueRanges(ranges: readonly TimeRange[]): TimeRange[] {
-  const byKey = new Map(ranges.map((range) => [rangeKey(range), range]));
-  return [...byKey.values()];
+/** Planner parts that a round or a load fetched, and when it started. */
+export interface PlannerLoad {
+  parts: FetchedPart[];
+  /** Epoch milliseconds when the requests started. */
+  startedAt: number;
 }
 
 /** Everything a round learned. Maps replace or extend the cached maps key by key. */
 export interface RoundUpdate {
   session: SessionData;
-  planner: Record<string, PlannerEntry>;
+  /** `null`: the round did not load planner items. */
+  planner: PlannerLoad | null;
   details: Record<string, Assignment>;
   undated: Record<string, Assignment[]>;
   /** `undefined`: the round did not load the override list. */
@@ -218,8 +226,12 @@ export interface RoundContext {
   /** The cache when the round starts. */
   cache: SessionCache;
   hiddenCourseIds: readonly string[];
-  /** The planner ranges of the views in use, computed from the session data. */
-  rangesFor(session: SessionData): TimeRange[];
+  /** The planner range of the current-week view. Light and full rounds reload it. */
+  currentRange(session: SessionData): TimeRange;
+  /** The planner ranges of the views in use. A round loads missing details of their items. */
+  rangesInUse(session: SessionData): TimeRange[];
+  /** Assignment ids whose details another load is fetching now. */
+  detailsInFlight: ReadonlySet<string>;
   /** Epoch milliseconds. */
   now: number;
 }
@@ -235,7 +247,7 @@ async function loadSession(api: CanvasApi): Promise<SessionData> {
   return { profile, courses, groups, colors, positions };
 }
 
-interface PerCourseResult<T> {
+export interface PerCourseResult<T> {
   loaded: Record<string, T>;
   failed: string[];
   /** How many requests were sent. */
@@ -284,9 +296,69 @@ function throwOnOutage(results: readonly PerCourseResult<unknown>[]): void {
   if (sent > 0 && outages.length === sent) throw outages[0];
 }
 
+/** The assignment details that a details request brought back. */
+export interface DetailsResult {
+  details: Record<string, Assignment>;
+  /** Skip keys of ids that failed, or that Canvas left out of its answer. */
+  skipped: string[];
+  failedCourses: string[];
+  requests: PerCourseResult<Assignment[]>;
+}
+
+/** Loads assignment details by id, one request per course. */
+export async function loadDetails(
+  api: CanvasApi,
+  detailIds: Readonly<Record<string, string[]>>,
+): Promise<DetailsResult> {
+  const requests = await perCourse(Object.keys(detailIds), (courseId) =>
+    api.listAssignmentsByIds(courseId, detailIds[courseId] ?? []),
+  );
+  const details: Record<string, Assignment> = {};
+  for (const list of Object.values(requests.loaded)) {
+    for (const assignment of list) details[assignment.id] = assignment;
+  }
+  // Ids that failed, or that Canvas left out of its answer, wait for the next refresh round.
+  const skipped: string[] = [];
+  for (const [courseId, ids] of Object.entries(detailIds)) {
+    const failed = requests.failed.includes(courseId);
+    const missing = ids.filter((id) => failed || details[id] === undefined);
+    skipped.push(...missing.map(skipKey.details));
+  }
+  return { details, skipped, failedCourses: requests.failed, requests };
+}
+
+/** Every assignment id of the lookup, by course, in one record. */
+function joinLookups(...lookups: Readonly<Record<string, string[]>>[]): Record<string, string[]> {
+  const joined: Record<string, string[]> = {};
+  for (const lookup of lookups) {
+    for (const [courseId, ids] of Object.entries(lookup)) {
+      joined[courseId] = [...new Set([...(joined[courseId] ?? []), ...ids])];
+    }
+  }
+  return joined;
+}
+
+/** Fetches planner chunks side by side. */
+export async function fetchParts(
+  api: CanvasApi,
+  chunks: readonly Interval[],
+): Promise<FetchedPart[]> {
+  const lists = await Promise.all(chunks.map((chunk) => api.listPlannerItems(toRange(chunk))));
+  return chunks.map((interval, index) => ({ interval, items: lists[index] ?? [] }));
+}
+
+/**
+ * The chunks a light or full round reloads: the planner range of the current-week view. Where
+ * the cache already covers it, the cached items show how to split it into one-page chunks.
+ */
+export function roundChunks(coverage: PlannerCoverage, current: TimeRange): Interval[] {
+  const interval = toInterval(current);
+  return chunkInterval(interval, isCovered(coverage, interval) ? itemTimes(coverage) : null);
+}
+
 interface PlannerResult {
   limited: boolean;
-  planner: Record<string, PlannerEntry>;
+  load: PlannerLoad | null;
 }
 
 /**
@@ -295,53 +367,17 @@ interface PlannerResult {
  */
 async function loadPlanner(
   api: CanvasApi,
-  ranges: readonly TimeRange[],
+  chunks: readonly Interval[],
   now: number,
   self: () => Promise<UserSelf>,
 ): Promise<PlannerResult> {
   try {
-    const lists = await Promise.all(ranges.map((range) => api.listPlannerItems(range)));
-    const planner: Record<string, PlannerEntry> = {};
-    ranges.forEach((range, index) => {
-      planner[rangeKey(range)] = { range, items: lists[index] ?? [], loadedAt: now, usedAt: now };
-    });
-    return { limited: false, planner };
+    return { limited: false, load: { parts: await fetchParts(api, chunks), startedAt: now } };
   } catch (error) {
     if (!isCanvasError(error, 'forbidden')) throw error;
     await self();
-    return { limited: true, planner: {} };
+    return { limited: true, load: null };
   }
-}
-
-/**
- * The planner ranges a round loads. Light and full rounds load one range that covers every view
- * in use. An ensure round loads each view range that no cached entry covers.
- */
-function plannerRanges(
-  context: RoundContext,
-  session: SessionData,
-  retryPlanner: boolean,
-): TimeRange[] {
-  const all = uniqueRanges(context.rangesFor(session));
-  if (context.cache.limited && !retryPlanner) return [];
-  if (context.kind === 'ensure') {
-    return all.filter((range) => coveringEntry(context.cache.planner, range) === null);
-  }
-  const span = spanOf(all);
-  return span === null ? [] : [span];
-}
-
-function plannerItemsAfter(
-  context: RoundContext,
-  session: SessionData,
-  fresh: Readonly<Record<string, PlannerEntry>>,
-): PlannerItem[] {
-  const entries = new Set<PlannerEntry>();
-  for (const range of context.rangesFor(session)) {
-    const entry = coveringEntry(fresh, range) ?? coveringEntry(context.cache.planner, range);
-    if (entry !== null) entries.add(entry);
-  }
-  return [...entries].flatMap((entry) => entry.items);
 }
 
 /** Calls `load` once, on first use, and shares its promise. */
@@ -378,7 +414,7 @@ export async function runRound(context: RoundContext): Promise<RoundUpdate> {
 
   const update: RoundUpdate = {
     session,
-    planner: {},
+    planner: null,
     details: {},
     undated: {},
     overrides: undefined,
@@ -388,19 +424,28 @@ export async function runRound(context: RoundContext): Promise<RoundUpdate> {
     skipped,
     failedCourses: [],
   };
-  const ranges =
-    session.courses.length === 0 ? [] : plannerRanges(context, session, kind === 'full');
+  // In limited mode, only a full round asks the planner again, to learn whether it is back.
+  const reloadPlanner =
+    session.courses.length > 0 && kind !== 'ensure' && (!cache.limited || kind === 'full');
+  const current = reloadPlanner ? context.currentRange(session) : null;
+  // In limited mode, one request is enough to learn whether the planner is back.
+  const chunks =
+    current === null
+      ? []
+      : cache.limited
+        ? [toInterval(current)]
+        : roundChunks(cache.planner, current);
   const [planner] = await Promise.all([
-    ranges.length > 0 ? loadPlanner(api, ranges, context.now, self) : null,
+    chunks.length > 0 ? loadPlanner(api, chunks, context.now, self) : null,
     userCheck,
   ]);
   if (session.courses.length === 0) return update;
   if (planner !== null) {
     update.limited = planner.limited;
-    update.planner = planner.planner;
+    update.planner = planner.load;
   }
   // Session data, planner items and the user check show that Canvas answers.
-  const sentShared = cache.session === null || ranges.length > 0 || userCheck !== null;
+  const sentShared = cache.session === null || chunks.length > 0 || userCheck !== null;
 
   if (update.limited) {
     const courses =
@@ -418,30 +463,34 @@ export async function runRound(context: RoundContext): Promise<RoundUpdate> {
     skipped.push(...all.failed.map(skipKey.all));
     all.failed.forEach((id) => failedCourses.add(id));
   } else {
-    const items = plannerItemsAfter(context, session, update.planner);
-    const lookup = assignmentIdsToLookup(items, context.hiddenCourseIds);
-    const detailIds = kind === 'full' ? lookup : missingDetailIds(lookup, base);
+    const coverage =
+      update.planner === null
+        ? cache.planner
+        : mergeFetched(cache.planner, update.planner.parts, update.planner.startedAt);
+    const inUse = itemsInRanges(coverage, context.rangesInUse(session));
+    const missing = missingDetailIds(
+      assignmentIdsToLookup(inUse, context.hiddenCourseIds),
+      base,
+      context.detailsInFlight,
+    );
+    // A full round reloads the details of the current week's items, so their chips stay current.
+    const fresh = update.planner?.parts.flatMap((part) => part.items) ?? [];
+    const detailIds =
+      kind === 'full'
+        ? joinLookups(assignmentIdsToLookup(fresh, context.hiddenCourseIds), missing)
+        : missing;
     const undatedCourses =
       kind === 'full' ? visible : missingCourses(visible, cache.undated, base, skipKey.undated);
     const [details, undated] = await Promise.all([
-      perCourse(Object.keys(detailIds), (courseId) =>
-        api.listAssignmentsByIds(courseId, detailIds[courseId] ?? []),
-      ),
+      loadDetails(api, detailIds),
       perCourse(undatedCourses, (courseId) => api.listUndatedAssignments(courseId)),
     ]);
-    if (!sentShared) throwOnOutage([details, undated]);
-    for (const list of Object.values(details.loaded)) {
-      for (const assignment of list) update.details[assignment.id] = assignment;
-    }
-    // Ids that failed, or that Canvas left out of its answer, wait for the next refresh round.
-    for (const [courseId, ids] of Object.entries(detailIds)) {
-      const failed = details.failed.includes(courseId);
-      const missing = ids.filter((id) => failed || update.details[id] === undefined);
-      skipped.push(...missing.map(skipKey.details));
-    }
+    if (!sentShared) throwOnOutage([details.requests, undated]);
+    update.details = details.details;
+    skipped.push(...details.skipped);
     update.undated = undated.loaded;
     skipped.push(...undated.failed.map(skipKey.undated));
-    [...details.failed, ...undated.failed].forEach((id) => failedCourses.add(id));
+    [...details.failedCourses, ...undated.failed].forEach((id) => failedCourses.add(id));
 
     const undatedAfter = { ...cache.undated, ...update.undated };
     const needed = overridesNeeded(false, undatedAfter, visible);
@@ -475,27 +524,18 @@ export async function runRound(context: RoundContext): Promise<RoundUpdate> {
   return update;
 }
 
-/**
- * The cache after a successful round. Bookkeeping such as patches stays as it is. A new planner
- * entry replaces the older entries that it covers, because they hold older copies of its items.
- */
+/** The cache after a successful round. Bookkeeping such as patches stays as it is. */
 export function commitUpdate(cache: SessionCache, update: RoundUpdate, now: number): SessionCache {
-  const planner = { ...cache.planner };
-  for (const [key, entry] of Object.entries(update.planner)) {
-    let usedAt = entry.usedAt;
-    for (const [oldKey, old] of Object.entries(planner)) {
-      if (oldKey !== key && !(oldKey in update.planner) && rangeCovers(entry.range, old.range)) {
-        usedAt = Math.max(usedAt, old.usedAt);
-        delete planner[oldKey];
-      }
-    }
-    planner[key] = { ...entry, usedAt: Math.max(usedAt, cache.planner[key]?.usedAt ?? 0) };
-  }
   const limitedChanged = update.limited !== cache.limited;
+  const planner = update.limited
+    ? emptyCoverage()
+    : update.planner === null
+      ? cache.planner
+      : mergeFetched(cache.planner, update.planner.parts, update.planner.startedAt);
   return {
     ...cache,
     session: update.session,
-    planner: update.limited ? {} : planner,
+    planner,
     details: { ...cache.details, ...update.details },
     undated: { ...cache.undated, ...update.undated },
     overrides: update.overrides ?? (limitedChanged ? null : cache.overrides),
@@ -514,7 +554,7 @@ export function clearData(cache: SessionCache): SessionCache {
   return {
     ...cache,
     session: null,
-    planner: {},
+    planner: emptyCoverage(),
     details: {},
     undated: {},
     overrides: null,

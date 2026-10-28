@@ -586,6 +586,43 @@ describe('concurrency', () => {
   });
 });
 
+describe('request priority', () => {
+  it('shares one queue across priorities and sends the most urgent waiting request first', async () => {
+    const gates: Array<Deferred<void>> = [];
+    const order: string[] = [];
+    server.use(
+      http.get(`${ORIGIN}/api/v1/courses/:id/assignments`, async ({ params }) => {
+        order.push(String(params['id']));
+        const gate = deferred();
+        gates.push(gate);
+        await gate.promise;
+        return HttpResponse.json([]);
+      }),
+    );
+    const client = testClient();
+    const calls = [
+      ...['1', '2', '3'].map((id) => client.listUndatedAssignments(id)),
+      // A load ahead, a refresh round and a week that the student opened.
+      client.withPriority('low').listUndatedAssignments('7'),
+      client.listUndatedAssignments('8'),
+      client.withPriority('high').listUndatedAssignments('9'),
+    ];
+
+    await settleUntil(() => order.length === 3);
+    await settle();
+    // The other priorities wait for the same three slots.
+    expect(order).toEqual(['1', '2', '3']);
+    for (let index = 0; index < 6; index += 1) {
+      await settleUntil(() => gates.length > index);
+      gates[index]?.resolve();
+    }
+    await Promise.all(calls);
+    expect(order).toEqual(['1', '2', '3', '9', '8', '7']);
+    expect(client.withPriority('low')).toBe(client.withPriority('low'));
+    expect(client.withPriority('normal').origin).toBe(client.origin);
+  });
+});
+
 describe('rate limit backoff', () => {
   function rateLimitedThenOk(failures: number, failure: () => Response) {
     const state = { calls: 0 };

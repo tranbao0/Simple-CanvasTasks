@@ -15,13 +15,8 @@ import {
   type Settings,
   type WeekView,
 } from '../model';
-import {
-  coveringEntry,
-  rangeCovers,
-  type PlannerEntry,
-  type SessionCache,
-  type SessionData,
-} from './cache';
+import type { SessionCache, SessionData } from './cache';
+import { coveredItems, isCovered, toInterval, type PlannerCoverage } from './coverage';
 import { applyPatches } from './patches';
 import type { CourseChoice, RequestSurface, SurfaceRequest } from './protocol';
 
@@ -61,7 +56,7 @@ export function canvasTimeZone(session: SessionData, context: ViewContext): stri
   return resolveViewBasics(basicsInput(session, 0, context)).timeZone;
 }
 
-/** The planner request range of a view. */
+/** The planner range that a view needs. */
 export function plannerRangeForView(
   session: SessionData,
   weekOffset: number,
@@ -82,29 +77,24 @@ export function weekRange(
   return { start: bounds.start, end: isoInstant(Date.parse(bounds.end) - 1) };
 }
 
-export interface PickedEntry {
-  entry: PlannerEntry;
-  /** The entry covers the whole planner range of the view, from the horizon on. */
-  complete: boolean;
+export interface PlannerFit {
+  /** The cache holds every item of the view's planner range, from the horizon on. */
+  exact: boolean;
+  /**
+   * The cache holds every item of the viewed week, so the view can show. Without `exact`, the
+   * Past due group may lack older items, such as after midnight or after a settings change.
+   */
+  showable: boolean;
 }
 
-/**
- * The cached planner items for a view: an entry that covers its whole planner range, or else the
- * newest entry that covers the viewed week, such as the range from before midnight or before a
- * settings change. The second kind may lack older past-due items, so it is not complete.
- */
-export function pickPlannerEntry(
-  cache: Pick<SessionCache, 'planner'>,
+/** How well the cached planner items fit a view. */
+export function plannerFit(
+  coverage: Pick<PlannerCoverage, 'spans'>,
   range: TimeRange,
   week: TimeRange,
-): PickedEntry | null {
-  const full = coveringEntry(cache.planner, range);
-  if (full !== null) return { entry: full, complete: true };
-  const covering = Object.values(cache.planner)
-    .filter((entry) => rangeCovers(entry.range, week))
-    .sort((a, b) => b.loadedAt - a.loadedAt);
-  const entry = covering[0];
-  return entry === undefined ? null : { entry, complete: false };
+): PlannerFit {
+  const exact = isCovered(coverage, toInterval(range));
+  return { exact, showable: exact || isCovered(coverage, toInterval(week)) };
 }
 
 function position(positions: DashboardPositions, courseId: string): number {
@@ -222,7 +212,7 @@ export function courseFilterApplies(
 }
 
 /**
- * The week view for a request, or `null` when no cached planner items cover it yet.
+ * The week view for a request, or `null` when the cached planner items do not cover its week yet.
  * A course filter that no longer applies is dropped, so the view's `courseFilter` is then
  * `undefined` and the surface clears its own filter.
  */
@@ -252,18 +242,20 @@ function viewForRequest(
     };
   }
   const range = plannerRangeForView(session, request.weekOffset, context);
-  const picked = pickPlannerEntry(cache, range, weekRange(session, request.weekOffset, context));
-  if (picked === null) return null;
+  const fit = plannerFit(cache.planner, range, weekRange(session, request.weekOffset, context));
+  if (!fit.showable) return null;
+  // Every cached item goes in: the model places each by its own date and drops the rest, so a
+  // peer review shows in its real week whichever request brought it.
+  const items = coveredItems(cache.planner);
   return {
-    view: buildWeekView(modelInputFor(cache, session, picked.entry.items, request, context)),
-    exact: picked.complete,
+    view: buildWeekView(modelInputFor(cache, session, items, request, context)),
+    exact: fit.exact,
   };
 }
 
-/** Every item the cache knows, with the pending writes applied. Recent ranges win. */
+/** Every item the cache knows, with the pending writes applied. */
 export function allItems(cache: SessionCache, session: SessionData, context: ViewContext): Item[] {
-  const entries = Object.values(cache.planner).sort((a, b) => b.usedAt - a.usedAt);
-  const plannerItems = entries.flatMap((entry) => entry.items);
+  const plannerItems = coveredItems(cache.planner);
   const input = modelInputFor(
     cache,
     session,

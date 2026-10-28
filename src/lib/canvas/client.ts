@@ -14,7 +14,7 @@ import {
   type CanvasResponse,
   type HttpMethod,
 } from './http';
-import { createLimiter } from './limiter';
+import { createLimiter, type PrioritySource, type RequestPriority } from './limiter';
 import { findNextLink } from './paging';
 import { withRateLimitRetry } from './retry';
 import {
@@ -91,7 +91,8 @@ function assignmentsPath(courseId: string): string {
 
 /**
  * Creates the Canvas client. All requests share one queue with at most `maxConcurrency`
- * requests in flight, and each request retries on a rate limit.
+ * requests in flight, and each request retries on a rate limit. Requests go at `normal`
+ * priority; `withPriority` gives the same calls at another priority on the same queue.
  */
 export function createCanvasClient(options: CanvasClientOptions): CanvasApi {
   const origin = toCanvasOrigin(options.origin);
@@ -101,152 +102,169 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasApi {
     fetchImpl: options.fetchImpl,
   });
   const limit = createLimiter(options.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY);
+  const fixed = new Map<RequestPriority, CanvasApi>();
 
-  const send = (request: CanvasRequest): Promise<CanvasResponse> =>
-    limit(() => withRateLimitRetry(() => transport(request)));
-
-  const getObject = async <T>(url: string): Promise<T> =>
-    expectObject<T>((await send({ method: 'GET', url })).data, url);
-
-  /** Follows `Link: rel="next"` to the last page. A repeated page ends the list. */
-  const getAll = async <T>(firstUrl: string): Promise<T[]> => {
-    const items: T[] = [];
-    const visited = new Set<string>();
-    let url: string | null = firstUrl;
-    while (url !== null) {
-      const key = resolveOnOrigin(origin, url).href;
-      if (visited.has(key)) break;
-      visited.add(key);
-      const page = await send({ method: 'GET', url });
-      items.push(...expectArray<T>(page.data, url));
-      url = findNextLink(page.link);
+  const withPriority = (priority: PrioritySource): CanvasApi => {
+    if (typeof priority === 'function') return clientAt(priority);
+    let api = fixed.get(priority);
+    if (api === undefined) {
+      api = clientAt(priority);
+      fixed.set(priority, api);
     }
-    return items;
+    return api;
   };
 
-  const write = async <T>(
-    method: Exclude<HttpMethod, 'GET'>,
-    url: string,
-    body: unknown,
-  ): Promise<T> => expectObject<T>((await send({ method, url, body })).data, url);
+  function clientAt(priority: PrioritySource): CanvasApi {
+    const send = (request: CanvasRequest): Promise<CanvasResponse> =>
+      limit(() => withRateLimitRetry(() => transport(request)), priority);
 
-  const listAssignmentBatch = (courseId: string, ids: readonly string[]): Promise<Assignment[]> =>
-    getAll<Assignment>(
-      apiUrl(assignmentsPath(courseId), [
-        ...ids.map((id): QueryParam => ['assignment_ids[]', id]),
-        ['include[]', 'submission'],
-        ['per_page', Math.max(PER_PAGE, ids.length)],
-      ]),
-    );
+    const getObject = async <T>(url: string): Promise<T> =>
+      expectObject<T>((await send({ method: 'GET', url })).data, url);
 
-  const listStatusBatch = async (
-    courseIds: readonly string[],
-  ): Promise<Record<string, CustomGradeStatus[]>> => {
-    const response = await send({
-      method: 'POST',
-      url: GRAPHQL_PATH,
-      body: customGradeStatusesQuery(courseIds),
-    });
-    return readCustomGradeStatuses(courseIds, response.data);
-  };
+    /** Follows `Link: rel="next"` to the last page. A repeated page ends the list. */
+    const getAll = async <T>(firstUrl: string): Promise<T[]> => {
+      const items: T[] = [];
+      const visited = new Set<string>();
+      let url: string | null = firstUrl;
+      while (url !== null) {
+        const key = resolveOnOrigin(origin, url).href;
+        if (visited.has(key)) break;
+        visited.add(key);
+        const page = await send({ method: 'GET', url });
+        items.push(...expectArray<T>(page.data, url));
+        url = findNextLink(page.link);
+      }
+      return items;
+    };
 
-  return {
-    origin,
+    const write = async <T>(
+      method: Exclude<HttpMethod, 'GET'>,
+      url: string,
+      body: unknown,
+    ): Promise<T> => expectObject<T>((await send({ method, url, body })).data, url);
 
-    getSelf: async () => getObject<UserSelf>('/api/v1/users/self'),
-
-    getProfile: async () => getObject<Profile>('/api/v1/users/self/profile'),
-
-    listCourses: async () =>
-      getAll<Course>(
-        apiUrl('/api/v1/courses', [
-          ['enrollment_state', 'active'],
-          ['enrollment_type', 'student'],
-          ['include[]', 'term'],
-          ['per_page', PER_PAGE],
-        ]),
-      ),
-
-    listGroups: async () =>
-      getAll<Group>(apiUrl('/api/v1/users/self/groups', [['per_page', PER_PAGE]])),
-
-    getColors: async () => getObject<Colors>('/api/v1/users/self/colors'),
-
-    getDashboardPositions: async () =>
-      getObject<DashboardPositions>('/api/v1/users/self/dashboard_positions'),
-
-    listPlannerItems: async (range) =>
-      getAll<PlannerItem>(
-        apiUrl('/api/v1/planner/items', [
-          ['start_date', range.start],
-          ['end_date', range.end],
-          ['per_page', PER_PAGE],
-        ]),
-      ),
-
-    listAssignmentsByIds: async (courseId, assignmentIds) => {
-      const batches = chunk(unique(assignmentIds), MAX_ASSIGNMENT_IDS_PER_REQUEST);
-      const results = await Promise.all(batches.map((ids) => listAssignmentBatch(courseId, ids)));
-      return results.flat();
-    },
-
-    // `include[]=checkpoints` makes Canvas send `has_sub_assignments`, so the model can drop
-    // checkpointed discussions, whose parent assignment has no due date.
-    listUndatedAssignments: async (courseId) =>
+    const listAssignmentBatch = (courseId: string, ids: readonly string[]): Promise<Assignment[]> =>
       getAll<Assignment>(
         apiUrl(assignmentsPath(courseId), [
-          ['bucket', 'undated'],
+          ...ids.map((id): QueryParam => ['assignment_ids[]', id]),
           ['include[]', 'submission'],
-          ['include[]', 'checkpoints'],
-          ['exclude_checkpoints', true],
-          ['per_page', PER_PAGE],
+          ['per_page', Math.max(PER_PAGE, ids.length)],
         ]),
-      ),
-
-    listAllAssignments: async (courseId) =>
-      getAll<Assignment>(
-        apiUrl(assignmentsPath(courseId), [
-          ['include[]', 'submission'],
-          ['include[]', 'checkpoints'],
-          ['per_page', PER_PAGE],
-        ]),
-      ),
-
-    listPlannerOverrides: async () => {
-      const overrides = await getAll<PlannerOverride>(
-        apiUrl('/api/v1/planner/overrides', [['per_page', PER_PAGE]]),
       );
-      return uniqueBy(overrides, (override) => override.id);
-    },
 
-    listCustomGradeStatuses: async (courseIds) => {
-      const batches = chunk(unique(courseIds), MAX_GRAPHQL_ALIASES);
-      const results = await Promise.all(batches.map(listStatusBatch));
-      return Object.fromEntries(results.flatMap((result) => Object.entries(result)));
-    },
+    const listStatusBatch = async (
+      courseIds: readonly string[],
+    ): Promise<Record<string, CustomGradeStatus[]>> => {
+      const response = await send({
+        method: 'POST',
+        url: GRAPHQL_PATH,
+        body: customGradeStatusesQuery(courseIds),
+      });
+      return readCustomGradeStatuses(courseIds, response.data);
+    };
 
-    createOverride: async (input) =>
-      write<PlannerOverride>('POST', '/api/v1/planner/overrides', {
-        plannable_type: input.plannableType,
-        plannable_id: input.plannableId,
-        marked_complete: input.markedComplete,
-        dismissed: input.dismissed,
-      }),
+    return {
+      origin,
 
-    updateOverride: async (id, input) =>
-      write<PlannerOverride>('PUT', `/api/v1/planner/overrides/${pathId(id)}`, {
-        marked_complete: input.markedComplete,
-        dismissed: input.dismissed,
-      }),
+      withPriority,
 
-    createNote: async (input) =>
-      write<PlannerNote>('POST', '/api/v1/planner_notes', noteBody(input)),
+      getSelf: async () => getObject<UserSelf>('/api/v1/users/self'),
 
-    updateNote: async (id, input) =>
-      write<PlannerNote>('PUT', `/api/v1/planner_notes/${pathId(id)}`, noteBody(input)),
+      getProfile: async () => getObject<Profile>('/api/v1/users/self/profile'),
 
-    deleteNote: async (id) => {
-      await send({ method: 'DELETE', url: `/api/v1/planner_notes/${pathId(id)}` });
-    },
-  };
+      listCourses: async () =>
+        getAll<Course>(
+          apiUrl('/api/v1/courses', [
+            ['enrollment_state', 'active'],
+            ['enrollment_type', 'student'],
+            ['include[]', 'term'],
+            ['per_page', PER_PAGE],
+          ]),
+        ),
+
+      listGroups: async () =>
+        getAll<Group>(apiUrl('/api/v1/users/self/groups', [['per_page', PER_PAGE]])),
+
+      getColors: async () => getObject<Colors>('/api/v1/users/self/colors'),
+
+      getDashboardPositions: async () =>
+        getObject<DashboardPositions>('/api/v1/users/self/dashboard_positions'),
+
+      listPlannerItems: async (range) =>
+        getAll<PlannerItem>(
+          apiUrl('/api/v1/planner/items', [
+            ['start_date', range.start],
+            ['end_date', range.end],
+            ['per_page', PER_PAGE],
+          ]),
+        ),
+
+      listAssignmentsByIds: async (courseId, assignmentIds) => {
+        const batches = chunk(unique(assignmentIds), MAX_ASSIGNMENT_IDS_PER_REQUEST);
+        const results = await Promise.all(batches.map((ids) => listAssignmentBatch(courseId, ids)));
+        return results.flat();
+      },
+
+      // `include[]=checkpoints` makes Canvas send `has_sub_assignments`, so the model can drop
+      // checkpointed discussions, whose parent assignment has no due date.
+      listUndatedAssignments: async (courseId) =>
+        getAll<Assignment>(
+          apiUrl(assignmentsPath(courseId), [
+            ['bucket', 'undated'],
+            ['include[]', 'submission'],
+            ['include[]', 'checkpoints'],
+            ['exclude_checkpoints', true],
+            ['per_page', PER_PAGE],
+          ]),
+        ),
+
+      listAllAssignments: async (courseId) =>
+        getAll<Assignment>(
+          apiUrl(assignmentsPath(courseId), [
+            ['include[]', 'submission'],
+            ['include[]', 'checkpoints'],
+            ['per_page', PER_PAGE],
+          ]),
+        ),
+
+      listPlannerOverrides: async () => {
+        const overrides = await getAll<PlannerOverride>(
+          apiUrl('/api/v1/planner/overrides', [['per_page', PER_PAGE]]),
+        );
+        return uniqueBy(overrides, (override) => override.id);
+      },
+
+      listCustomGradeStatuses: async (courseIds) => {
+        const batches = chunk(unique(courseIds), MAX_GRAPHQL_ALIASES);
+        const results = await Promise.all(batches.map(listStatusBatch));
+        return Object.fromEntries(results.flatMap((result) => Object.entries(result)));
+      },
+
+      createOverride: async (input) =>
+        write<PlannerOverride>('POST', '/api/v1/planner/overrides', {
+          plannable_type: input.plannableType,
+          plannable_id: input.plannableId,
+          marked_complete: input.markedComplete,
+          dismissed: input.dismissed,
+        }),
+
+      updateOverride: async (id, input) =>
+        write<PlannerOverride>('PUT', `/api/v1/planner/overrides/${pathId(id)}`, {
+          marked_complete: input.markedComplete,
+          dismissed: input.dismissed,
+        }),
+
+      createNote: async (input) =>
+        write<PlannerNote>('POST', '/api/v1/planner_notes', noteBody(input)),
+
+      updateNote: async (id, input) =>
+        write<PlannerNote>('PUT', `/api/v1/planner_notes/${pathId(id)}`, noteBody(input)),
+
+      deleteNote: async (id) => {
+        await send({ method: 'DELETE', url: `/api/v1/planner_notes/${pathId(id)}` });
+      },
+    };
+  }
+
+  return withPriority('normal');
 }

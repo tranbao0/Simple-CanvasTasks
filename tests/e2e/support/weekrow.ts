@@ -39,6 +39,15 @@ export interface ServedCanvas {
   scenario: Scenario;
 }
 
+export interface ScenarioOptions {
+  /** Changes the scenario before the fake serves it, such as adding a term of work. */
+  extend?: (scenario: Scenario) => void;
+  /** How long every answer waits. See `FakeCanvasOptions.latencyMs`. */
+  latencyMs?: number;
+  /** See `CanvasState.plannerPageSize`. */
+  plannerPageSize?: number;
+}
+
 /**
  * Serves the scenario Canvas with state at `https://school.instructure.com`. Page routes and
  * other overrides go first, so they win over the API.
@@ -46,10 +55,15 @@ export interface ServedCanvas {
 export async function serveScenario(
   context: BrowserContext,
   first: readonly FakeCanvasRoute[] = [],
+  options: ScenarioOptions = {},
 ): Promise<ServedCanvas> {
   const scenario = buildScenario(SCENARIO_NOW);
+  options.extend?.(scenario);
   const state = new CanvasState(scenario);
-  const canvas = await serveFakeCanvas(context, [...first, ...state.routes()]);
+  state.plannerPageSize = options.plannerPageSize ?? null;
+  const canvas = await serveFakeCanvas(context, [...first, ...state.routes()], {
+    latencyMs: options.latencyMs,
+  });
   return { canvas, state, scenario };
 }
 

@@ -5,6 +5,7 @@
 import { vi, type Mock } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import type { ProbeResult } from '../../canvas/probe';
+import type { TimeRange } from '../../canvas/types';
 import {
   DEFAULT_SETTINGS,
   type ItemView,
@@ -26,9 +27,11 @@ import {
   buildScenario,
   type Scenario,
 } from '../../../../tests/fixtures/scenario';
-import { sessionCacheItem, setupStatusItem } from '../cache';
+import { sessionCacheItem, setupStatusItem, type SessionData } from '../cache';
+import { mergeIntervals, toInterval, toRange } from '../coverage';
 import { createDataOwner, type DataOwner, type DataOwnerDeps, type RefreshSource } from '../owner';
 import type { SurfaceRequest } from '../protocol';
+import { plannerRangeForView, weekRange, type ViewContext } from '../state';
 import { createFakeCanvas, type FakeCanvas } from './fakeCanvas';
 
 export const ORIGIN = SCENARIO_ORIGIN;
@@ -129,14 +132,19 @@ export function expectReady(state: SurfaceState): ReadyState {
   return state;
 }
 
-/** Loads the first view and waits for every request. */
+/**
+ * Loads the first view and waits for every request, including the neighbor weeks that load in
+ * the background once the view shows.
+ */
 export async function loadReady(
   harness: Harness,
   request: SurfaceRequest = PANEL,
 ): Promise<ReadyState> {
   await harness.owner.getState(request);
   await harness.owner.settled();
-  return expectReady(await harness.owner.getState(request));
+  const state = expectReady(await harness.owner.getState(request));
+  await harness.owner.settled();
+  return state;
 }
 
 export function viewItems(view: WeekView): ItemView[] {
@@ -156,4 +164,43 @@ export function findItem(state: ReadyState, key: string): ItemView | undefined {
 export async function advance(harness: Harness, ms: number): Promise<void> {
   await vi.advanceTimersByTimeAsync(ms);
   await harness.owner.settled();
+}
+
+async function scenarioView(
+  harness: Harness,
+): Promise<{ session: SessionData; context: ViewContext }> {
+  const { scenario } = harness.canvas;
+  return {
+    session: {
+      profile: scenario.profile,
+      courses: scenario.courses,
+      groups: scenario.groups,
+      colors: scenario.colors,
+      positions: scenario.dashboardPositions,
+    },
+    context: {
+      origin: scenario.origin,
+      now: Date.now(),
+      settings: await settingsItem.getValue(),
+      browserTimeZone: scenario.timeZone,
+      browserLanguage: 'en-US',
+    },
+  };
+}
+
+/** The planner range that a view of the scenario needs, at the current fake time. */
+export async function rangeOf(harness: Harness, weekOffset: number): Promise<TimeRange> {
+  const { session, context } = await scenarioView(harness);
+  return plannerRangeForView(session, weekOffset, context);
+}
+
+/** The instants of a week of the scenario, both ends included, at the current fake time. */
+export async function weekOf(harness: Harness, weekOffset: number): Promise<TimeRange> {
+  const { session, context } = await scenarioView(harness);
+  return weekRange(session, weekOffset, context);
+}
+
+/** Planner ranges joined where they touch or overlap, such as the chunks of one request. */
+export function joinRanges(ranges: readonly TimeRange[]): TimeRange[] {
+  return mergeIntervals(ranges.map(toInterval)).map(toRange);
 }

@@ -2,6 +2,7 @@
  * A fake `CanvasApi` that answers from the scenario fixture and remembers writes, like Canvas.
  * Tests only.
  */
+import type { PrioritySource, RequestPriority } from '../../canvas/limiter';
 import {
   CanvasError,
   type CanvasApi,
@@ -15,11 +16,13 @@ import { itemKey } from '../../model';
 import { plannerItemsInRange, type Scenario } from '../../../../tests/fixtures/scenario';
 import { notePlannerItem, plannerItemKey } from '../patches';
 
-export type FakeMethod = Exclude<keyof CanvasApi, 'origin'>;
+export type FakeMethod = Exclude<keyof CanvasApi, 'origin' | 'withPriority'>;
 
 export interface FakeCall {
   method: FakeMethod;
   args: unknown[];
+  /** The priority the call was sent with. */
+  priority: RequestPriority;
 }
 
 interface Failure {
@@ -35,6 +38,8 @@ export interface FakeCanvas extends CanvasApi {
   readonly calls: FakeCall[];
   /** The arguments of every call to one method. */
   callsOf(method: FakeMethod): unknown[][];
+  /** The planner ranges asked for, in order. */
+  plannerRanges(): TimeRange[];
   /** Makes the next `times` calls of a method reject with `error`. */
   fail(method: FakeMethod, error: unknown, options?: { times?: number; firstArg?: unknown }): void;
   /** Makes calls of a method wait until the returned function runs. */
@@ -75,8 +80,13 @@ export function createFakeCanvas(scenario: Scenario): FakeCanvas {
   }
   for (const override of scenario.plannerOverrides) overrides.set(overrideKey(override), override);
 
-  async function call<T>(method: FakeMethod, args: unknown[], run: () => T): Promise<T> {
-    calls.push({ method, args });
+  async function call<T>(
+    method: FakeMethod,
+    args: unknown[],
+    run: () => T,
+    priority: PrioritySource,
+  ): Promise<T> {
+    calls.push({ method, args, priority: typeof priority === 'function' ? priority() : priority });
     await holds.get(method);
     const list = failures.get(method) ?? [];
     const failure = list.find(
@@ -149,12 +159,118 @@ export function createFakeCanvas(scenario: Scenario): FakeCanvas {
     return note;
   }
 
+  function methods(priority: PrioritySource): Omit<CanvasApi, 'origin' | 'withPriority'> {
+    return {
+      getSelf: () => call('getSelf', [], () => scenario.self, priority),
+      getProfile: () => call('getProfile', [], () => scenario.profile, priority),
+      listCourses: () => call('listCourses', [], () => scenario.courses, priority),
+      listGroups: () => call('listGroups', [], () => scenario.groups, priority),
+      getColors: () => call('getColors', [], () => scenario.colors, priority),
+      getDashboardPositions: () =>
+        call('getDashboardPositions', [], () => scenario.dashboardPositions, priority),
+      listPlannerItems: (range) =>
+        call('listPlannerItems', [range], () => plannerItems(range), priority),
+      listAssignmentsByIds: (courseId, ids) =>
+        call(
+          'listAssignmentsByIds',
+          [courseId, ids],
+          () => (scenario.assignments[courseId] ?? []).filter((a) => ids.includes(a.id)),
+          priority,
+        ),
+      listUndatedAssignments: (courseId) =>
+        call(
+          'listUndatedAssignments',
+          [courseId],
+          () => scenario.undatedAssignments[courseId] ?? [],
+          priority,
+        ),
+      listAllAssignments: (courseId) =>
+        call(
+          'listAllAssignments',
+          [courseId],
+          () => scenario.assignments[courseId] ?? [],
+          priority,
+        ),
+      listPlannerOverrides: () =>
+        call('listPlannerOverrides', [], () => [...overrides.values()], priority),
+      listCustomGradeStatuses: (courseIds) =>
+        call(
+          'listCustomGradeStatuses',
+          [courseIds],
+          () =>
+            Object.fromEntries(courseIds.map((id) => [id, scenario.customGradeStatuses[id] ?? []])),
+          priority,
+        ),
+      createOverride: (input) =>
+        call(
+          'createOverride',
+          [input],
+          () => {
+            const assignmentId = input.plannableType === 'assignment' ? input.plannableId : null;
+            const key = itemKey(input.plannableType, input.plannableId, assignmentId);
+            if (overrides.has(key)) throw canvasError('bad_request', 400);
+            const override: PlannerOverride = {
+              id: String(nextId++),
+              plannable_type: input.plannableType,
+              plannable_id: input.plannableId,
+              user_id: scenario.self.id,
+              assignment_id: assignmentId,
+              workflow_state: 'active',
+              marked_complete: input.markedComplete,
+              dismissed: input.dismissed,
+            };
+            overrides.set(key, override);
+            return override;
+          },
+          priority,
+        ),
+      updateOverride: (id, input) =>
+        call(
+          'updateOverride',
+          [id, input],
+          () => {
+            const entry = [...overrides.entries()].find(([, override]) => override.id === id);
+            if (entry === undefined) throw canvasError('not_found', 404);
+            const updated = {
+              ...entry[1],
+              marked_complete: input.markedComplete,
+              dismissed: input.dismissed,
+            };
+            overrides.set(entry[0], updated);
+            return updated;
+          },
+          priority,
+        ),
+      createNote: (input) =>
+        call('createNote', [input], () => saveNote(String(nextId++), input), priority),
+      updateNote: (id, input) =>
+        call('updateNote', [id, input], () => saveNote(id, input), priority),
+      deleteNote: (id) =>
+        call(
+          'deleteNote',
+          [id],
+          () => {
+            notes.set(id, null);
+          },
+          priority,
+        ),
+    };
+  }
+
+  function withPriority(priority: PrioritySource): CanvasApi {
+    return { origin: scenario.origin, withPriority, ...methods(priority) };
+  }
+
   const fake: FakeCanvas = {
     origin: scenario.origin,
     scenario,
     calls,
     callsOf: (method) =>
       calls.filter((entry) => entry.method === method).map((entry) => entry.args),
+    plannerRanges: () =>
+      calls
+        .filter((entry) => entry.method === 'listPlannerItems')
+        .map((entry) => entry.args[0] as TimeRange),
     fail(method, error, options = {}) {
       const list = failures.get(method) ?? [];
       list.push({
@@ -185,63 +301,8 @@ export function createFakeCanvas(scenario: Scenario): FakeCanvas {
       overrides.set(overrideKey(override), override);
     },
 
-    getSelf: () => call('getSelf', [], () => scenario.self),
-    getProfile: () => call('getProfile', [], () => scenario.profile),
-    listCourses: () => call('listCourses', [], () => scenario.courses),
-    listGroups: () => call('listGroups', [], () => scenario.groups),
-    getColors: () => call('getColors', [], () => scenario.colors),
-    getDashboardPositions: () =>
-      call('getDashboardPositions', [], () => scenario.dashboardPositions),
-    listPlannerItems: (range) => call('listPlannerItems', [range], () => plannerItems(range)),
-    listAssignmentsByIds: (courseId, ids) =>
-      call('listAssignmentsByIds', [courseId, ids], () =>
-        (scenario.assignments[courseId] ?? []).filter((a) => ids.includes(a.id)),
-      ),
-    listUndatedAssignments: (courseId) =>
-      call('listUndatedAssignments', [courseId], () => scenario.undatedAssignments[courseId] ?? []),
-    listAllAssignments: (courseId) =>
-      call('listAllAssignments', [courseId], () => scenario.assignments[courseId] ?? []),
-    listPlannerOverrides: () => call('listPlannerOverrides', [], () => [...overrides.values()]),
-    listCustomGradeStatuses: (courseIds) =>
-      call('listCustomGradeStatuses', [courseIds], () =>
-        Object.fromEntries(courseIds.map((id) => [id, scenario.customGradeStatuses[id] ?? []])),
-      ),
-    createOverride: (input) =>
-      call('createOverride', [input], () => {
-        const assignmentId = input.plannableType === 'assignment' ? input.plannableId : null;
-        const key = itemKey(input.plannableType, input.plannableId, assignmentId);
-        if (overrides.has(key)) throw canvasError('bad_request', 400);
-        const override: PlannerOverride = {
-          id: String(nextId++),
-          plannable_type: input.plannableType,
-          plannable_id: input.plannableId,
-          user_id: scenario.self.id,
-          assignment_id: assignmentId,
-          workflow_state: 'active',
-          marked_complete: input.markedComplete,
-          dismissed: input.dismissed,
-        };
-        overrides.set(key, override);
-        return override;
-      }),
-    updateOverride: (id, input) =>
-      call('updateOverride', [id, input], () => {
-        const entry = [...overrides.entries()].find(([, override]) => override.id === id);
-        if (entry === undefined) throw canvasError('not_found', 404);
-        const updated = {
-          ...entry[1],
-          marked_complete: input.markedComplete,
-          dismissed: input.dismissed,
-        };
-        overrides.set(entry[0], updated);
-        return updated;
-      }),
-    createNote: (input) => call('createNote', [input], () => saveNote(String(nextId++), input)),
-    updateNote: (id, input) => call('updateNote', [id, input], () => saveNote(id, input)),
-    deleteNote: (id) =>
-      call('deleteNote', [id], () => {
-        notes.set(id, null);
-      }),
+    withPriority,
+    ...methods('normal'),
   };
   return fake;
 }

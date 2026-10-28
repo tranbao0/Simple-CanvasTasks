@@ -89,6 +89,8 @@ export interface RecordedRequest {
   headers: Readonly<Record<string, string>>;
   /** When the request reached the fake, in epoch milliseconds of the test runner. */
   at: number;
+  /** When the fake sent its answer, in epoch milliseconds of the test runner, or `null` before. */
+  answeredAt: number | null;
 }
 
 export interface FakeCanvas {
@@ -104,6 +106,11 @@ export interface FakeCanvas {
 export interface FakeCanvasOptions {
   /** Defaults to {@link FAKE_CANVAS_ORIGIN}. */
   origin?: string;
+  /**
+   * How long every answer of the fake origin waits, as the round trip to a real Canvas does.
+   * Requests wait side by side, so parallel requests do not add up. Defaults to 0.
+   */
+  latencyMs?: number;
 }
 
 interface Reply {
@@ -198,6 +205,7 @@ function record(request: Request, url: URL): RecordedRequest {
     postData: request.postData(),
     headers: request.headers(),
     at: Date.now(),
+    answeredAt: null,
   };
 }
 
@@ -222,6 +230,7 @@ export async function serveFakeCanvas(
   options: FakeCanvasOptions = {},
 ): Promise<FakeCanvas> {
   const origin = new URL(options.origin ?? FAKE_CANVAS_ORIGIN).origin;
+  const latencyMs = options.latencyMs ?? 0;
   const replies = new Map<FakeCanvasRoute, Reply>();
   for (const route of routes) if (!isHandlerRoute(route)) replies.set(route, replyFor(route));
   const requests: RecordedRequest[] = [];
@@ -242,6 +251,7 @@ export async function serveFakeCanvas(
     }
     const recorded = record(request, url);
     requests.push(recorded);
+    if (latencyMs > 0) await new Promise((resolve) => setTimeout(resolve, latencyMs));
     const match = routes.find((candidate) => matches(candidate, request.method(), url));
     const reply =
       match === undefined
@@ -249,13 +259,14 @@ export async function serveFakeCanvas(
         : isHandlerRoute(match)
           ? toReply(await match.respond(recorded))
           : replies.get(match);
+    recorded.answeredAt = Date.now();
     if (reply === undefined) {
       unmatched.push(recorded);
       await route.fulfill({ status: 404, contentType: JSON_TYPE, body: NOT_FOUND_BODY });
       return;
     }
-    if (match !== undefined && isHandlerRoute(match)) {
-      // The test may end, and close the browser, while a held answer waits.
+    if (latencyMs > 0 || (match !== undefined && isHandlerRoute(match))) {
+      // The test may end, and close the browser, while a held or delayed answer waits.
       await route.fulfill(reply).catch(() => undefined);
       return;
     }

@@ -8,7 +8,9 @@ import {
   ORIGIN,
   PANEL,
   createHarness,
+  joinRanges,
   loadReady,
+  rangeOf,
   useScenarioClock,
   type Harness,
 } from '../testing/harness';
@@ -182,7 +184,9 @@ describe('setup check', () => {
 
     expect(watched.length).toBeGreaterThan(0);
     expect(h.canvas.callsOf('getProfile')).toHaveLength(1);
-    expect(h.canvas.callsOf('listPlannerItems')).toHaveLength(1);
+    // One round: the chunks of the current week's planner range, each asked for once.
+    expect(joinRanges(h.canvas.plannerRanges())).toEqual([await rangeOf(h, 0)]);
+    expect(h.canvas.callsOf('listUndatedAssignments')).toHaveLength(5);
   });
 
   it('clears the offer when the student accepts it', async () => {

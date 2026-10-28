@@ -216,10 +216,12 @@ export interface PlannerRangeParams extends HorizonParams {
 }
 
 /**
- * The planner request range.
+ * The planner range that a view needs. The data layer requests only the parts of it that its
+ * cache lacks.
  * It starts at the earliest horizon of the visible courses, or at the start of the viewed week when
- * that is earlier. It ends one millisecond before the end of the viewed week, or before the end of
- * tomorrow when that is later.
+ * that is earlier, so older-style peer reviews, which Canvas files under the reviewer's own due
+ * date, come back in their real week. It ends one millisecond before the end of the viewed week, or
+ * before the end of tomorrow when that is later.
  */
 export function plannerRange(params: PlannerRangeParams): TimeRange {
   const bounds = weekBounds(params);

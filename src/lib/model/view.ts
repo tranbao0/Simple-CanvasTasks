@@ -276,7 +276,7 @@ export function resolveViewBasics(
   return { timeZone, locale, weekStartDay: resolveWeekStartDay(input.settings.weekStart, locale) };
 }
 
-/** The planner request range for a view, from the same inputs as `buildWeekView`. */
+/** The planner range that a view needs, from the same inputs as `buildWeekView`. */
 export function plannerRangeFor(
   input: Pick<
     ModelInput,

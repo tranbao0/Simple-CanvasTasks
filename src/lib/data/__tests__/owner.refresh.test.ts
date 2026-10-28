@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { plannerRangeFor } from '../../model';
 import { changeMarkerItem, settingsItem } from '../../platform/storage';
 import { IDS } from '../../../../tests/fixtures/scenario';
 import { sessionCacheItem, type SessionCache } from '../cache';
+import { toRange } from '../coverage';
+import { ACTIVE_RANGE_MS } from '../owner';
 import { REFRESH_LIMIT_MS, TIMER_FULL_AFTER_MS } from '../policy';
 import { canvasError, type FakeMethod } from '../testing/fakeCanvas';
 import {
@@ -11,9 +12,12 @@ import {
   advance,
   createHarness,
   expectReady,
+  joinRanges,
   loadReady,
+  rangeOf,
   type Harness,
   useScenarioClock,
+  weekOf,
 } from '../testing/harness';
 
 beforeEach(() => useScenarioClock());
@@ -38,17 +42,18 @@ async function loaded(): Promise<Harness> {
   return h;
 }
 
-/** The planner range of a week of the scenario at the current fake time. */
-async function rangeOf(h: Harness, weekOffset: number) {
-  return plannerRangeFor({
-    now: new Date(Date.now()).toISOString(),
-    profile: h.canvas.scenario.profile,
-    settings: await settingsItem.getValue(),
-    browserTimeZone: h.canvas.scenario.timeZone,
-    browserLanguage: 'en-US',
-    weekOffset,
-    courses: h.canvas.scenario.courses,
-  });
+/** The first load only, before the next week loads ahead. */
+async function firstLoadOnly(): Promise<Harness> {
+  const h = await createHarness();
+  await h.owner.getState(PANEL);
+  await h.owner.settled();
+  h.canvas.resetCalls();
+  return h;
+}
+
+async function cachedSpans(): Promise<ReturnType<typeof joinRanges>> {
+  const cache = (await sessionCacheItem.getValue()) as SessionCache;
+  return joinRanges(cache.planner.spans.map(toRange));
 }
 
 describe('light and full rounds', () => {
@@ -109,9 +114,9 @@ describe('light and full rounds', () => {
     await h.owner.settled();
     expect([...methods(h)].sort()).toEqual([...LIGHT, ...FULL_EXTRA].sort());
   });
-  it('refreshes the current week and the recently shown weeks with one planner request', async () => {
+  it('refreshes only the current week, and a shown week catches up in the background', async () => {
     const h = await loaded();
-    for (let offset = 1; offset <= 6; offset += 1) {
+    for (let offset = 1; offset <= 3; offset += 1) {
       await h.owner.getState({ ...PANEL, weekOffset: offset });
       await h.owner.settled();
     }
@@ -121,33 +126,67 @@ describe('light and full rounds', () => {
     await h.owner.trigger('focus');
     await h.owner.settled();
 
-    const current = await rangeOf(h, 0);
-    const latest = await rangeOf(h, 6);
-    expect(h.canvas.callsOf('listPlannerItems')).toEqual([
-      [{ start: current.start, end: latest.end }],
-    ]);
-    // Every shown week reads from that one entry, so no view asks Canvas again.
+    // The round asks for the current week's range only, however many weeks were shown.
+    expect(joinRanges(h.canvas.plannerRanges())).toEqual([await rangeOf(h, 0)]);
     h.canvas.resetCalls();
-    for (let offset = 0; offset <= 6; offset += 1) {
-      expect(expectReady(await h.owner.getState({ ...PANEL, weekOffset: offset })).refreshing).toBe(
-        false,
-      );
-    }
+
+    // A shown week shows at once and loads its own week again after the round.
+    const shown = expectReady(await h.owner.getState({ ...PANEL, weekOffset: 2 }));
+    expect(shown.view.weekStart).toBe('2026-11-08');
+    expect(shown.refreshing).toBe(true);
+    await h.owner.settled();
+    expect(h.canvas.plannerRanges()).toEqual([await weekOf(h, 2)]);
+    // After a light round, only its planner items.
+    expect(h.canvas.callsOf('listAssignmentsByIds')).toEqual([]);
+    expect(h.canvas.calls.every((call) => call.priority === 'normal')).toBe(true);
+
+    // Then it asks nothing more until the next round.
+    h.canvas.resetCalls();
+    expect(expectReady(await h.owner.getState({ ...PANEL, weekOffset: 2 })).refreshing).toBe(false);
     await h.owner.settled();
     expect(h.canvas.calls).toEqual([]);
   });
 
-  it('keeps one planner entry for the views it covers', async () => {
+  it('reloads the assignment details of a shown week after a full round', async () => {
     const h = await loaded();
     await h.owner.getState({ ...PANEL, weekOffset: 1 });
     await h.owner.settled();
-    await advance(h, 61_000);
+    await advance(h, 5 * 60_000);
+    await h.owner.refresh('timer', FROM_PANEL);
+    await h.owner.settled();
+    h.canvas.resetCalls();
 
+    await h.owner.getState({ ...PANEL, weekOffset: 1 });
+    await h.owner.settled();
+
+    expect(h.canvas.plannerRanges()).toEqual([await weekOf(h, 1)]);
+    expect(h.canvas.callsOf('listAssignmentsByIds').length).toBeGreaterThan(0);
+    expect(h.canvas.callsOf('listUndatedAssignments')).toEqual([]);
+  });
+
+  it('keeps one contiguous coverage, and forgets weeks no view used for 10 minutes', async () => {
+    const h = await loaded();
+    await h.owner.getState({ ...PANEL, weekOffset: 1 });
+    await h.owner.settled();
+    await h.owner.getState({ ...PANEL, weekOffset: 2 });
+    await h.owner.settled();
+    // From the horizon to the week after the last shown one, which loaded ahead.
+    expect(await cachedSpans()).toEqual([
+      { start: (await rangeOf(h, 0)).start, end: (await weekOf(h, 3)).end },
+    ]);
+
+    await advance(h, ACTIVE_RANGE_MS + 61_000);
     await h.owner.trigger('focus');
     await h.owner.settled();
 
+    // The current week's range and the next week stay.
+    expect(await cachedSpans()).toEqual([
+      { start: (await rangeOf(h, 0)).start, end: (await weekOf(h, 1)).end },
+    ]);
     const cache = (await sessionCacheItem.getValue()) as SessionCache;
-    expect(Object.keys(cache.planner)).toHaveLength(1);
+    const end = Date.parse((await weekOf(h, 1)).end);
+    const dates = Object.values(cache.planner.items).map((item) => Date.parse(item.plannable_date));
+    expect(dates.every((date) => date <= end)).toBe(true);
   });
 });
 
@@ -290,17 +329,34 @@ describe('midnight, settings and address changes', () => {
   /** Saturday 00:00:01 in New York: the Tomorrow look-ahead now reaches into the next week. */
   const SATURDAY = Date.parse('2026-10-31T04:00:01Z');
 
-  it('loads the planner items of a range that grew after midnight in the Canvas time zone', async () => {
-    const h = await loaded();
+  it('loads only the day that a range grew by after midnight in the Canvas time zone', async () => {
+    const h = await firstLoadOnly();
     expect(h.canvas.scenario.now).toBe('2026-10-27T18:00:00.000Z');
 
     vi.setSystemTime(SATURDAY);
     await h.owner.refresh('midnight', FROM_PANEL);
+    const state = expectReady(await h.owner.getState(PANEL));
     await h.owner.settled();
 
-    expect(h.canvas.callsOf('listPlannerItems')).toEqual([[await rangeOf(h, 0)]]);
-    const state = expectReady(await h.owner.getState(PANEL));
     expect(state.view.today).toBe('2026-10-31');
+    // Tomorrow is the first day of the next week, and only that day was missing.
+    expect(h.canvas.plannerRanges()).toEqual([
+      { start: (await weekOf(h, 1)).start, end: (await rangeOf(h, 0)).end },
+    ]);
+    expect(h.canvas.calls[0]?.priority).toBe('high');
+  });
+
+  it('needs no request after a midnight when the week ahead already loaded', async () => {
+    const h = await loaded();
+
+    vi.setSystemTime(SATURDAY);
+    await h.owner.refresh('midnight', FROM_PANEL);
+    const state = expectReady(await h.owner.getState(PANEL));
+    await h.owner.settled();
+
+    expect(state.view.today).toBe('2026-10-31');
+    expect(state.refreshing).toBe(false);
+    expect(h.canvas.callsOf('listPlannerItems')).toEqual([]);
   });
 
   it('needs no request after a midnight that the cached range still covers', async () => {
@@ -317,7 +373,7 @@ describe('midnight, settings and address changes', () => {
   });
 
   it('shows the list from the old range while the new range loads', async () => {
-    const h = await loaded();
+    const h = await firstLoadOnly();
     vi.setSystemTime(SATURDAY);
     const release = h.canvas.hold('listPlannerItems');
 

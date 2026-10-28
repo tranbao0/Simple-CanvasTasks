@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { collectItems, type Item } from '../../model';
 import { IDS, SCENARIO } from '../../../../tests/fixtures/scenario';
-import { emptyCache, prunePlanner, rangeCovers, type PlannerEntry } from '../cache';
 import {
   applyPatches,
   matchesTarget,
@@ -14,7 +13,6 @@ import {
   type NotePatch,
   type OverridePatch,
 } from '../patches';
-import { pickPlannerEntry } from '../state';
 
 const CONTEXT = { courses: SCENARIO.courses, userId: IDS.user };
 
@@ -237,50 +235,5 @@ describe('applying patches', () => {
       ],
     });
     expect(remapped['undo-2']).toEqual(undos['undo-2']);
-  });
-});
-
-describe('planner entries', () => {
-  const entry = (
-    start: string,
-    end: string,
-    loadedAt: number,
-    usedAt = loadedAt,
-  ): PlannerEntry => ({
-    range: { start, end },
-    items: [],
-    loadedAt,
-    usedAt,
-  });
-
-  it('uses an entry that covers the whole range as complete', () => {
-    const week = { start: '2026-10-25T04:00:00.000Z', end: '2026-11-01T03:59:59.999Z' };
-    const old = entry('2026-07-07T04:00:00.000Z', '2026-11-01T03:59:59.999Z', 1);
-    const newer = entry('2026-07-06T04:00:00.000Z', '2026-11-08T04:59:59.999Z', 2);
-    const cache = { ...emptyCache('https://a.edu'), planner: { a: old, b: newer } };
-    const wanted = { start: '2026-07-08T04:00:00.000Z', end: '2026-11-01T03:59:59.999Z' };
-
-    expect(pickPlannerEntry(cache, wanted, week)).toEqual({ entry: newer, complete: true });
-    expect(rangeCovers(old.range, week)).toBe(true);
-  });
-
-  it('else uses the newest entry that covers the week, as not complete', () => {
-    const week = { start: '2026-10-25T04:00:00.000Z', end: '2026-11-01T03:59:59.999Z' };
-    // From before midnight: it starts a day after the new range.
-    const before = entry('2026-07-09T04:00:00.000Z', '2026-11-01T03:59:59.999Z', 1);
-    const cache = { ...emptyCache('https://a.edu'), planner: { a: before } };
-    const wanted = { start: '2026-07-08T04:00:00.000Z', end: '2026-11-01T03:59:59.999Z' };
-
-    expect(pickPlannerEntry(cache, wanted, week)).toEqual({ entry: before, complete: false });
-    expect(
-      pickPlannerEntry(cache, wanted, { ...week, end: '2026-11-08T04:59:59.999Z' }),
-    ).toBeNull();
-  });
-
-  it('keeps the most recently used ranges', () => {
-    const planner = Object.fromEntries(
-      Array.from({ length: 10 }, (_, index) => [`k${index}`, entry('a', 'b', 0, index)]),
-    );
-    expect(Object.keys(prunePlanner(planner, 3)).sort()).toEqual(['k7', 'k8', 'k9']);
   });
 });

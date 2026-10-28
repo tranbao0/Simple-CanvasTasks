@@ -1,7 +1,13 @@
 import type { PlannerNote } from '../../../src/lib/canvas/types';
 import { notePlannerItem, type FixtureContext } from '../../fixtures/canvas-json';
 import { CANVAS_ERRORS, type CanvasErrorFixture } from '../../fixtures/errors';
-import { IDS, allAssignmentsInCourse, type Scenario } from '../../fixtures/scenario';
+import {
+  IDS,
+  allAssignmentsInCourse,
+  plannerItemKey,
+  type Scenario,
+} from '../../fixtures/scenario';
+import { compareInstants } from '../../fixtures/time';
 import type { WirePlannerItem, WirePlannerOverride } from '../../fixtures/wire-types';
 import type { FakeCanvas, FakeCanvasRoute, FakeReply, RecordedRequest } from './fake-canvas';
 import { apiRoutes, json } from './scenario-api';
@@ -59,12 +65,19 @@ export interface WriteRecord {
  * - `plannerReply` makes the planner answer with an error, for example a 500.
  * - `limited` turns on "Limited Access for Students": the planner and planner notes answer 403,
  *   and the all-assignments request answers with every assignment of the course.
+ * - `plannerPageSize` makes the planner answer as Canvas does: only the rows of the requested
+ *   range, in pages with a `Link: rel="next"` header.
  */
 export class CanvasState {
   readonly scenario: Scenario;
   /** When set, `GET /api/v1/planner/items` answers with this reply. */
   plannerReply: FakeReply | null = null;
   limited = false;
+  /**
+   * The most rows one planner page holds. `null` answers every row of the term on one page,
+   * whatever the range: the extension places items by their own dates and drops the rest.
+   */
+  plannerPageSize: number | null = null;
   private readonly overrides = new Map<string, WirePlannerOverride>();
   private readonly notes = new Map<string, NoteRecord>();
   private nextOverrideId = 99001;
@@ -120,9 +133,12 @@ export class CanvasState {
     return [
       {
         path: '/api/v1/planner/items',
-        respond: () => {
+        respond: (request) => {
           if (this.limited) return errorReply(CANVAS_ERRORS.limitedAccess);
-          return this.plannerReply ?? { body: json(this.plannerItems()) };
+          if (this.plannerReply !== null) return this.plannerReply;
+          return this.plannerPageSize === null
+            ? { body: json(this.plannerItems()) }
+            : this.plannerPage(request, this.plannerPageSize);
         },
       },
       {
@@ -170,6 +186,34 @@ export class CanvasState {
       })),
       ...apiRoutes(this.scenario),
     ];
+  }
+
+  /**
+   * One page of the rows whose range date is inside `start_date` to `end_date`, both ends
+   * included. Older-style peer reviews match on the reviewer's own due date, as in Canvas.
+   */
+  private plannerPage(request: RecordedRequest, pageSize: number): FakeReply {
+    const url = new URL(request.url);
+    const start = url.searchParams.get('start_date');
+    const end = url.searchParams.get('end_date');
+    const perPage = Math.min(Number(url.searchParams.get('per_page') ?? '10') || 10, pageSize);
+    const page = Math.max(1, Number(url.searchParams.get('page') ?? '1') || 1);
+    const rows = this.plannerItems().filter((row) => {
+      const date = this.scenario.plannerRangeDates[plannerItemKey(row)] ?? row.plannable_date;
+      return (
+        (start === null || compareInstants(start, date) <= 0) &&
+        (end === null || compareInstants(date, end) <= 0)
+      );
+    });
+    const pageRows = rows.slice((page - 1) * perPage, page * perPage);
+    const pageUrl = (number: number): string => {
+      const next = new URL(url);
+      next.searchParams.set('page', String(number));
+      return next.href;
+    };
+    const links = [`<${pageUrl(page)}>; rel="current"`, `<${pageUrl(1)}>; rel="first"`];
+    if (page * perPage < rows.length) links.unshift(`<${pageUrl(page + 1)}>; rel="next"`);
+    return { body: json(pageRows), headers: { link: links.join(',') } };
   }
 
   private fixtureContext(): FixtureContext {

@@ -39,6 +39,59 @@ describe('createLimiter', () => {
     expect(started).toEqual([0, 1, 2, 3, 4]);
   });
 
+  it('gives a free slot to the most urgent waiting task, in arrival order within a priority', async () => {
+    const limit = createLimiter(1);
+    const gate = deferred();
+    const started: string[] = [];
+    const run = (name: string) => async () => {
+      started.push(name);
+      if (name === 'first') await gate.promise;
+    };
+
+    const all = Promise.all([
+      limit(run('first')),
+      limit(run('low'), 'low'),
+      limit(run('normal'), 'normal'),
+      limit(run('high 1'), 'high'),
+      limit(run('high 2'), 'high'),
+      limit(run('default')),
+    ]);
+    await settle();
+    gate.resolve();
+    await all;
+
+    expect(started).toEqual(['first', 'high 1', 'high 2', 'normal', 'default', 'low']);
+  });
+
+  it('reads a priority function when a slot frees up, so a waiting task can turn urgent', async () => {
+    const limit = createLimiter(1);
+    const gate = deferred();
+    const started: string[] = [];
+    let ahead: 'low' | 'high' = 'low';
+
+    const all = Promise.all([
+      limit(async () => {
+        started.push('first');
+        await gate.promise;
+      }),
+      limit(async () => {
+        started.push('normal');
+      }),
+      limit(
+        async () => {
+          started.push('ahead');
+        },
+        () => ahead,
+      ),
+    ]);
+    await settle();
+    ahead = 'high';
+    gate.resolve();
+    await all;
+
+    expect(started).toEqual(['first', 'ahead', 'normal']);
+  });
+
   it('frees the slot when a task fails', async () => {
     const limit = createLimiter(1);
     await expect(limit(() => Promise.reject(new Error('boom')))).rejects.toThrow('boom');

@@ -5,6 +5,7 @@
  * `Accept: application/json+canvas-string-ids, application/json`.
  * All dates are ISO 8601 strings in UTC, or null.
  */
+import type { PrioritySource } from './limiter';
 
 export type PlannableType =
   | 'assignment'
@@ -259,6 +260,11 @@ export interface CanvasClientOptions {
  */
 export interface CanvasApi {
   readonly origin: string;
+  /**
+   * The same calls on the same request queue, sent with another priority. A function is read
+   * each time a request slot frees up, so a waiting request can become more urgent.
+   */
+  withPriority(priority: PrioritySource): CanvasApi;
   getSelf(): Promise<UserSelf>;
   getProfile(): Promise<Profile>;
   /** Active student enrollments, with `include[]=term`. */

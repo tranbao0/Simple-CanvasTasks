@@ -8,10 +8,12 @@
  * Everything it touches comes in through `DataOwnerDeps`, so it does not depend on where it
  * runs. The background uses it today; a panel page or a content script could host it instead.
  */
+import type { RequestPriority } from '../canvas/limiter';
 import type { CanvasApi, PlannerOverride, TimeRange } from '../canvas/types';
 import type { ProbeResult } from '../canvas/probe';
 import { canAutoSaveOrigin } from '../inpage/origin';
 import {
+  assignmentIdsToLookup,
   moveToTodayTodoDate,
   redoBlocksDone,
   todoDateFor,
@@ -28,9 +30,6 @@ import {
   emptyCache,
   isSessionCache,
   isSetupStatus,
-  prunePlanner,
-  rangeCovers,
-  rangeKey,
   setupStatusOrigin,
   type Failure,
   type SessionCache,
@@ -40,6 +39,23 @@ import {
   type UndoEntry,
   type UndoRecord,
 } from './cache';
+import {
+  chunkInterval,
+  clipCoverage,
+  coveredItems,
+  gapsIn,
+  itemTimes,
+  mergeFetched,
+  mergeIntervals,
+  overlaps,
+  staleParts,
+  subtractIntervals,
+  toInterval,
+  withItems,
+  type FetchedPart,
+  type Interval,
+  type PlannerCoverage,
+} from './coverage';
 import { failureFor, isCanvasError, isRefreshFailure } from './failures';
 import {
   applyPatch,
@@ -70,10 +86,14 @@ import {
   UserChangedError,
   clearData,
   commitUpdate,
+  fetchParts,
   hasNeeds,
+  loadDetails,
+  missingDetailIds,
   needsFor,
   runRound,
-  uniqueRanges,
+  statusCoursesNeeded,
+  type DetailsResult,
   type RoundKind,
   type RoundUpdate,
 } from './rounds';
@@ -86,6 +106,7 @@ import {
   plannerRangeForView,
   skippedCourseChoices,
   viewFor,
+  weekRange,
   type ViewContext,
 } from './state';
 
@@ -96,10 +117,8 @@ import {
 export const MAX_DELETE_DELAY_MS = 2 * 60_000;
 /** At most this many undo records are kept. A record past the cap ends like a closed notice. */
 export const MAX_UNDO_RECORDS = 20;
-/** A planner range counts as in use for this long after a surface showed it. */
+/** A view counts as in use for this long after a surface showed it. */
 export const ACTIVE_RANGE_MS = 10 * 60_000;
-/** At most this many recently shown ranges are refreshed, besides the current week. */
-export const MAX_ACTIVE_RANGES = 4;
 /** Temporary ids of custom tasks that Canvas has not created yet. */
 export const TEMP_NOTE_PREFIX = 'pending-';
 
@@ -194,6 +213,48 @@ export interface DataOwner {
 
 const NO_UNDO: ActionReply = { undo: null };
 const NO_RETRY: RefreshResult = { retryAt: null };
+
+/** A view that a surface showed. */
+interface ShownView {
+  /** The planner range the view needs. */
+  range: TimeRange;
+  /** The planner coverage worth keeping for the view: its range and its neighbor weeks. */
+  keep: Interval;
+  /** Epoch milliseconds. */
+  at: number;
+}
+
+type JobKind =
+  /** The planner gap of a view that a surface shows. */
+  | 'view'
+  /** The gap of a neighbor week, loaded before the student opens it. */
+  | 'prefetch'
+  /** A cached week other than the current one, loaded again after a refresh round. */
+  | 'refresh';
+
+/**
+ * A planner load outside the refresh rounds, so a new week never waits behind a round. It loads
+ * planner items first and shows them, then the assignment details of those items.
+ */
+interface PlannerJob {
+  kind: JobKind;
+  chunks: Interval[];
+  /** Read when a request slot frees up, so a prefetch that a view now needs goes first. */
+  priority: RequestPriority;
+  /** A surface shows the week, so the list shows the refresh marker until the job ends. */
+  shown: boolean;
+  /** `planner` until the items are in the cache, then `details`. */
+  phase: 'planner' | 'details';
+  /** Epoch milliseconds when the job started. */
+  startedAt: number;
+}
+
+function hull(intervals: readonly Interval[]): Interval {
+  return {
+    start: Math.min(...intervals.map((interval) => interval.start)),
+    end: Math.max(...intervals.map((interval) => interval.end)),
+  };
+}
 
 interface WriteContext {
   origin: string;
@@ -353,7 +414,12 @@ export function createDataOwner(deps: DataOwnerDeps): DataOwner {
   let setupRun = 0;
 
   const apis = new Map<string, CanvasApi>();
-  const requested = new Map<string, { range: TimeRange; at: number }>();
+  /** The views that surfaces showed lately, by their planner range. */
+  const requested = new Map<string, ShownView>();
+  /** Planner loads of views, prefetches and week refreshes that are running. */
+  const jobs = new Set<PlannerJob>();
+  /** Assignment ids whose details a planner job is fetching now. */
+  const detailsInFlight = new Set<string>();
   const pending: Record<RoundKind, boolean> = { full: false, light: false, ensure: false };
   let running = false;
   let runner: Promise<void> = Promise.resolve();
@@ -467,15 +533,50 @@ export function createDataOwner(deps: DataOwnerDeps): DataOwner {
     };
   }
 
-  /** The current week, plus every range a surface showed in the last 10 minutes. */
-  function rangesInUse(session: SessionData, context: ViewContext): TimeRange[] {
-    for (const [key, entry] of requested) {
-      if (context.now - entry.at > ACTIVE_RANGE_MS) requested.delete(key);
+  function recentViews(now: number): ShownView[] {
+    for (const [key, view] of requested) {
+      if (now - view.at > ACTIVE_RANGE_MS) requested.delete(key);
     }
-    const current = plannerRangeForView(session, 0, context);
-    // The map is in the order the ranges were last shown, oldest first.
-    const recent = [...requested.values()].slice(-MAX_ACTIVE_RANGES).map((entry) => entry.range);
-    return uniqueRanges([current, ...recent]);
+    return [...requested.values()];
+  }
+
+  /** The planner range of the current week, plus every range a surface showed in the last 10 minutes. */
+  function rangesInUse(session: SessionData, context: ViewContext): TimeRange[] {
+    return [
+      plannerRangeForView(session, 0, context),
+      ...recentViews(context.now).map((view) => view.range),
+    ];
+  }
+
+  /** Remembers that a surface shows a view, for its details and for what the cache keeps. */
+  function noteShown(
+    session: SessionData,
+    weekOffset: number,
+    range: TimeRange,
+    context: ViewContext,
+  ): void {
+    const neighbors = [weekOffset - 1, weekOffset + 1].map((offset) =>
+      toInterval(weekRange(session, offset, context)),
+    );
+    const key = `${range.start}/${range.end}`;
+    requested.delete(key);
+    requested.set(key, { range, keep: hull([toInterval(range), ...neighbors]), at: context.now });
+  }
+
+  /**
+   * The planner coverage worth keeping: the current week's range and the next week, which the
+   * current view loads ahead, plus the views shown in the last 10 minutes and their neighbor
+   * weeks. The rest goes, so the cache stays within the storage limits.
+   */
+  function prune(target: SessionCache, context: ViewContext): SessionCache {
+    const session = target.session;
+    if (session === null) return target;
+    const keep = hull([
+      toInterval(plannerRangeForView(session, 0, context)),
+      toInterval(weekRange(session, 1, context)),
+      ...recentViews(context.now).map((view) => view.keep),
+    ]);
+    return { ...target, planner: clipCoverage(target.planner, keep) };
   }
 
   function visibleCourseIds(session: SessionData, settings: Settings): string[] {
@@ -558,23 +659,27 @@ export function createDataOwner(deps: DataOwnerDeps): DataOwner {
     );
   }
 
+  /** Applies a confirmed patch to cached planner items. */
+  function bakePlanner(
+    coverage: PlannerCoverage,
+    patch: Patch,
+    session: SessionData,
+  ): PlannerCoverage {
+    const context = { courses: session.courses, userId: session.profile.id };
+    const items = applyPatch(
+      { plannerItems: coveredItems(coverage), overrides: null },
+      patch,
+      context,
+    );
+    return withItems(coverage, items.plannerItems);
+  }
+
   /** Applies a confirmed patch to the cached Canvas data, so it survives fresh rounds. */
   function bake(target: SessionCache, patch: Patch): SessionCache {
     const session = target.session;
     if (session === null) return target;
     const context = { courses: session.courses, userId: session.profile.id };
-    const planner = Object.fromEntries(
-      Object.entries(target.planner).map(([key, entry]) => [
-        key,
-        {
-          ...entry,
-          items: [
-            ...applyPatch({ plannerItems: entry.items, overrides: null }, patch, context)
-              .plannerItems,
-          ],
-        },
-      ]),
-    );
+    const planner = bakePlanner(target.planner, patch, session);
     const overrides =
       target.overrides === null
         ? null
@@ -585,8 +690,13 @@ export function createDataOwner(deps: DataOwnerDeps): DataOwner {
   /**
    * After a successful round: patches confirmed before the round started are now in the
    * fresh data and can go. Patches confirmed during the round go into the new data again.
+   * A patch also stays while a planner job that started before its confirmation still runs,
+   * because that job may bring items without it.
    */
   function settlePatches(target: SessionCache, startedAt: number): SessionCache {
+    const oldestJob = Math.min(
+      ...[...jobs].filter((job) => job.phase === 'planner').map((job) => job.startedAt),
+    );
     let next = target;
     const kept: Patch[] = [];
     for (const patch of target.patches) {
@@ -594,22 +704,11 @@ export function createDataOwner(deps: DataOwnerDeps): DataOwner {
       else if (patch.confirmedAt > startedAt) {
         next = bake(next, patch);
         kept.push(patch);
+      } else if (patch.confirmedAt > oldestJob) {
+        kept.push(patch);
       }
     }
     return { ...next, patches: kept };
-  }
-
-  /** Marks the entries that hold the ranges surfaces showed, so pruning keeps them. */
-  function markRangesUsed(target: SessionCache): SessionCache {
-    const planner = { ...target.planner };
-    for (const { range, at } of requested.values()) {
-      for (const [key, cached] of Object.entries(planner)) {
-        if (rangeCovers(cached.range, range)) {
-          planner[key] = { ...cached, usedAt: Math.max(cached.usedAt, at) };
-        }
-      }
-    }
-    return { ...target, planner: prunePlanner(planner) };
   }
 
   function clearSessionWork(): void {
@@ -617,6 +716,9 @@ export function createDataOwner(deps: DataOwnerDeps): DataOwner {
     deleteTimers.clear();
     queuedDeletes.clear();
     startedDeletes.clear();
+    // Running planner jobs finish without a trace, so their parts can load again.
+    jobs.clear();
+    detailsInFlight.clear();
   }
 
   /**
@@ -654,6 +756,7 @@ export function createDataOwner(deps: DataOwnerDeps): DataOwner {
         ranges: rangesInUse(cache.session, context),
         visibleCourseIds: visibleCourseIds(cache.session, context.settings),
         hiddenCourseIds: context.settings.hiddenCourseIds,
+        detailsInFlight,
       });
       if (!hasNeeds(needs)) return;
     }
@@ -669,7 +772,9 @@ export function createDataOwner(deps: DataOwnerDeps): DataOwner {
         kind,
         cache,
         hiddenCourseIds: context.settings.hiddenCourseIds,
-        rangesFor: (session) => rangesInUse(session, context),
+        currentRange: (session) => plannerRangeForView(session, 0, context),
+        rangesInUse: (session) => rangesInUse(session, context),
+        detailsInFlight,
         now: startedAt,
       });
     } catch (error) {
@@ -683,7 +788,7 @@ export function createDataOwner(deps: DataOwnerDeps): DataOwner {
     if (gen !== generation || cache === null) return;
 
     if (update !== null) {
-      cache = markRangesUsed(settlePatches(commitUpdate(cache, update, clock.now()), startedAt));
+      cache = prune(settlePatches(commitUpdate(cache, update, clock.now()), startedAt), context);
     } else if (failure?.kind === 'signed_out') {
       clearSessionWork();
       cache = { ...clearData(cache), failure };
@@ -718,6 +823,212 @@ export function createDataOwner(deps: DataOwnerDeps): DataOwner {
       case 'skip':
         return null;
     }
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Planner jobs
+  // ---------------------------------------------------------------------------------------------
+
+  /** The intervals that running jobs are fetching now. */
+  function pendingIntervals(): Interval[] {
+    return [...jobs].filter((job) => job.phase === 'planner').flatMap((job) => job.chunks);
+  }
+
+  /** Planner jobs run only on the data of a signed-in session with the planner on and no failed round. */
+  function plannerCoverage(): PlannerCoverage | null {
+    if (knownOrigin === null || cache === null || cache.session === null) return null;
+    if (cache.limited || blocksLoads(cache.failure)) return null;
+    return cache.planner;
+  }
+
+  /**
+   * Loads the parts of a planner range that the cache lacks and no job fetches yet, in chunks
+   * that load side by side. For a view, a running job that fetches any part of the range turns
+   * urgent and shows the refresh marker.
+   */
+  function loadGaps(range: TimeRange, kind: 'view' | 'prefetch', context: ViewContext): void {
+    const coverage = plannerCoverage();
+    if (coverage === null) return;
+    const interval = toInterval(range);
+    if (kind === 'view') {
+      for (const job of jobs) {
+        if (job.chunks.some((chunk) => overlaps(chunk, interval))) {
+          job.priority = 'high';
+          job.shown = true;
+        }
+      }
+    }
+    const gaps = gapsIn(coverage, interval, pendingIntervals());
+    if (gaps.length === 0) return;
+    const job: PlannerJob = {
+      kind,
+      chunks: gaps.flatMap((gap) => chunkInterval(gap, null)),
+      priority: kind === 'view' ? 'high' : 'low',
+      shown: kind === 'view',
+      phase: 'planner',
+      startedAt: clock.now(),
+    };
+    startJob(job, context, false);
+  }
+
+  /**
+   * A cached week other than the current one loads again in the background once a refresh round
+   * has started since it loaded. Rounds reload only the current week's range, so a week that a
+   * surface shows catches up this way. After a full round, its assignment details load again too.
+   */
+  function refreshIfStale(session: SessionData, weekOffset: number, context: ViewContext): void {
+    const coverage = plannerCoverage();
+    const limits = cache?.limits;
+    if (coverage === null || limits === undefined || limits.lastRoundAt === null) return;
+    const own = subtractIntervals(toInterval(weekRange(session, weekOffset, context)), [
+      toInterval(plannerRangeForView(session, 0, context)),
+    ]);
+    const lastRoundAt = limits.lastRoundAt;
+    const pending = pendingIntervals();
+    const stale = mergeIntervals(
+      own.flatMap((part) => staleParts(coverage, part, lastRoundAt)),
+    ).flatMap((part) => subtractIntervals(part, pending));
+    if (stale.length === 0) return;
+    const lastFullAt = limits.lastFullAt;
+    const reloadDetails =
+      lastFullAt !== null && own.some((part) => staleParts(coverage, part, lastFullAt).length > 0);
+    const times = itemTimes(coverage);
+    const job: PlannerJob = {
+      kind: 'refresh',
+      chunks: stale.flatMap((part) => chunkInterval(part, times)),
+      priority: 'normal',
+      shown: true,
+      phase: 'planner',
+      startedAt: clock.now(),
+    };
+    startJob(job, context, reloadDetails);
+  }
+
+  /** After a view shows: its week catches up after a round, and its neighbor weeks load ahead. */
+  function loadAround(session: SessionData, weekOffset: number, context: ViewContext): void {
+    if (weekOffset !== 0) refreshIfStale(session, weekOffset, context);
+    for (const offset of [weekOffset + 1, weekOffset - 1]) {
+      loadGaps(plannerRangeForView(session, offset, context), 'prefetch', context);
+    }
+  }
+
+  /** Whether a job for a week that a surface shows touches this planner range. */
+  function shownJobRunning(range: TimeRange): boolean {
+    const interval = toInterval(range);
+    return [...jobs].some(
+      (job) => job.shown && job.chunks.some((chunk) => overlaps(chunk, interval)),
+    );
+  }
+
+  function startJob(job: PlannerJob, context: ViewContext, reloadDetails: boolean): void {
+    const origin = knownOrigin;
+    if (origin === null) return;
+    jobs.add(job);
+    const api = apiFor(origin).withPriority(() => job.priority);
+    track(runJob(job, api, context, reloadDetails).finally(() => jobs.delete(job)));
+  }
+
+  /** Ids of the lookup that no other job is fetching. */
+  function notInFlight(lookup: Readonly<Record<string, string[]>>): Record<string, string[]> {
+    const result: Record<string, string[]> = {};
+    for (const [courseId, ids] of Object.entries(lookup)) {
+      const free = ids.filter((id) => !detailsInFlight.has(id));
+      if (free.length > 0) result[courseId] = free;
+    }
+    return result;
+  }
+
+  /**
+   * Runs a planner job: its items go into the cache and show as soon as they arrive, then the
+   * assignment details of those items fill in the chips.
+   */
+  async function runJob(
+    job: PlannerJob,
+    api: CanvasApi,
+    context: ViewContext,
+    reloadDetails: boolean,
+  ): Promise<void> {
+    const gen = generation;
+    let parts: FetchedPart[];
+    try {
+      parts = await fetchParts(api, job.chunks);
+    } catch (error) {
+      jobs.delete(job);
+      await jobFailed(job, error, api, gen);
+      return;
+    }
+    if (gen !== generation || cache?.session == null || cache.limited) return;
+    const session = cache.session;
+    let planner = mergeFetched(cache.planner, parts, job.startedAt);
+    // Items that loaded before a write's confirmation lack it, so confirmed writes go in again.
+    for (const patch of cache.patches) {
+      if (patch.confirmedAt !== null) planner = bakePlanner(planner, patch, session);
+    }
+    cache = prune({ ...cache, planner }, context);
+    job.phase = 'details';
+    const lookup = assignmentIdsToLookup(
+      parts.flatMap((part) => part.items),
+      context.settings.hiddenCourseIds,
+    );
+    const detailIds = reloadDetails
+      ? notInFlight(lookup)
+      : missingDetailIds(lookup, cache, detailsInFlight);
+    const ids = Object.values(detailIds).flat();
+    ids.forEach((id) => detailsInFlight.add(id));
+    persist();
+    await bump();
+    if (ids.length === 0) return;
+    let result: DetailsResult;
+    try {
+      result = await loadDetails(api, detailIds);
+    } catch (error) {
+      ids.forEach((id) => detailsInFlight.delete(id));
+      await jobFailed(job, error, api, gen);
+      return;
+    }
+    ids.forEach((id) => detailsInFlight.delete(id));
+    if (gen !== generation || cache?.session == null) return;
+    const loadedFor = cache.session;
+    cache = {
+      ...cache,
+      details: { ...cache.details, ...result.details },
+      skipped: [...new Set([...cache.skipped, ...result.skipped])],
+      failedCourses: [...new Set([...cache.failedCourses, ...result.failedCourses])],
+    };
+    // A teacher status in the new details needs its name, which an ensure round loads.
+    const visible = visibleCourseIds(loadedFor, context.settings);
+    if (statusCoursesNeeded(cache, visible).length > 0) schedule('ensure');
+    persist();
+    await bump();
+  }
+
+  /**
+   * A failed planner job. A prefetch that no surface shows fails quietly, because the student did
+   * not ask for it. A 403 can mean that the school now limits the planner, which a full round
+   * finds out. Any other failure shows as a failed round does.
+   */
+  async function jobFailed(
+    job: PlannerJob,
+    error: unknown,
+    api: CanvasApi,
+    gen: number,
+  ): Promise<void> {
+    deps.log('planner load', error);
+    if (!job.shown || gen !== generation) return;
+    if (isCanvasError(error, 'forbidden')) {
+      scheduleForcedFull();
+      return;
+    }
+    const failure = await failureFor(error, api, clock.now());
+    if (gen !== generation || cache === null) return;
+    if (failure.kind === 'signed_out') {
+      clearSessionWork();
+      cache = { ...clearData(cache), failure };
+    } else if (!blocksLoads(cache.failure)) {
+      cache = { ...cache, failure };
+    }
+    persist();
+    await bump();
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -1335,13 +1646,14 @@ export function createDataOwner(deps: DataOwnerDeps): DataOwner {
   // State
   // ---------------------------------------------------------------------------------------------
 
-  function requestEnsure(session: SessionData, context: ViewContext, range: TimeRange): void {
+  function requestEnsure(session: SessionData, context: ViewContext): void {
     if (cache === null || blocksLoads(cache.failure)) return;
     const needs = needsFor({
       cache,
-      ranges: uniqueRanges([range, plannerRangeForView(session, 0, context)]),
+      ranges: rangesInUse(session, context),
       visibleCourseIds: visibleCourseIds(session, context.settings),
       hiddenCourseIds: context.settings.hiddenCourseIds,
+      detailsInFlight,
     });
     if (hasNeeds(needs)) schedule('ensure');
   }
@@ -1376,16 +1688,16 @@ export function createDataOwner(deps: DataOwnerDeps): DataOwner {
     const context = await viewContext(origin);
     if (cache === null) return { kind: 'loading' };
     const range = plannerRangeForView(session, request.weekOffset, context);
-    const key = rangeKey(range);
-    requested.delete(key);
-    requested.set(key, { range, at: context.now });
-    requestEnsure(session, context, range);
+    noteShown(session, request.weekOffset, range, context);
+    loadGaps(range, 'view', context);
+    requestEnsure(session, context);
     const result = viewFor(cache, session, request, context);
     if (result === null) {
       return blocksLoads(failure)
         ? { kind: 'cant_load', origin, offline, savedOrigin: null, offer }
         : { kind: 'loading' };
     }
+    if (result.exact) loadAround(session, request.weekOffset, context);
 
     const seenNotes = await store.seenNotes.getValue();
     return {
@@ -1396,7 +1708,7 @@ export function createDataOwner(deps: DataOwnerDeps): DataOwner {
         failure?.kind === 'stale'
           ? { since: isoInstant(cache.lastSuccessAt ?? failure.at), offline }
           : null,
-      refreshing: running || !result.exact,
+      refreshing: running || !result.exact || shownJobRunning(range),
       offer,
       // The notice the surface holds, while its record lives.
       undo: (request.undoToken ? cache.undos[request.undoToken]?.info : undefined) ?? null,

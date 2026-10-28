@@ -12,16 +12,16 @@ import type {
   CustomGradeStatus,
   DashboardPositions,
   Group,
-  PlannerItem,
   PlannerOverride,
   Profile,
-  TimeRange,
 } from '../canvas/types';
 import type { UndoInfo } from '../model/types';
+import { browser } from 'wxt/browser';
 import { defineItem } from '../platform/storage';
+import { emptyCoverage, type PlannerCoverage } from './coverage';
 import type { OverrideFlags, OverrideTarget, Patch } from './patches';
 
-export const CACHE_VERSION = 4;
+export const CACHE_VERSION = 5;
 
 /** Data that loads once per browser session. */
 export interface SessionData {
@@ -30,16 +30,6 @@ export interface SessionData {
   groups: Group[];
   colors: Colors;
   positions: DashboardPositions;
-}
-
-/** The planner items of one request range. */
-export interface PlannerEntry {
-  range: TimeRange;
-  items: PlannerItem[];
-  /** Epoch milliseconds. */
-  loadedAt: number;
-  /** Epoch milliseconds of the last view that used this range. */
-  usedAt: number;
 }
 
 /** What failed: a refresh round, or a write of the student. */
@@ -102,8 +92,8 @@ export interface SessionCache {
   version: typeof CACHE_VERSION;
   origin: string;
   session: SessionData | null;
-  /** Planner items keyed by `rangeKey`. */
-  planner: Record<string, PlannerEntry>;
+  /** The planner items, merged from every load, and the spans they are complete for. */
+  planner: PlannerCoverage;
   /** Assignment details keyed by assignment id. Hand-in types rarely change, so they stay all session. */
   details: Record<string, Assignment>;
   /** Undated work keyed by course id. A missing key means the course was never loaded. */
@@ -145,7 +135,7 @@ export function emptyCache(origin: string): SessionCache {
     version: CACHE_VERSION,
     origin,
     session: null,
-    planner: {},
+    planner: emptyCoverage(),
     details: {},
     undated: {},
     overrides: null,
@@ -172,66 +162,6 @@ export function isSessionCache(value: unknown): value is SessionCache {
     (value as { version?: unknown }).version === CACHE_VERSION &&
     typeof (value as { origin?: unknown }).origin === 'string'
   );
-}
-
-/** The key of a planner range in `SessionCache.planner`. */
-export function rangeKey(range: TimeRange): string {
-  return `${range.start}/${range.end}`;
-}
-
-/** Whether `outer` covers every instant of `inner`. Instants are compared by value. */
-export function rangeCovers(outer: TimeRange, inner: TimeRange): boolean {
-  return (
-    Date.parse(outer.start) <= Date.parse(inner.start) &&
-    Date.parse(outer.end) >= Date.parse(inner.end)
-  );
-}
-
-/** The range from the earliest start to the latest end of the ranges. */
-export function spanOf(ranges: readonly TimeRange[]): TimeRange | null {
-  let span: TimeRange | null = null;
-  for (const range of ranges) {
-    if (span === null) {
-      span = range;
-      continue;
-    }
-    span = {
-      start: Date.parse(range.start) < Date.parse(span.start) ? range.start : span.start,
-      end: Date.parse(range.end) > Date.parse(span.end) ? range.end : span.end,
-    };
-  }
-  return span;
-}
-
-/**
- * The cached planner entry that holds every item of the range: the exact entry, else the newest
- * entry that covers the range. `null` when no entry covers it.
- */
-export function coveringEntry(
-  planner: Readonly<Record<string, PlannerEntry>>,
-  range: TimeRange,
-): PlannerEntry | null {
-  const exact = planner[rangeKey(range)];
-  if (exact !== undefined) return exact;
-  const covering = Object.values(planner)
-    .filter((entry) => rangeCovers(entry.range, range))
-    .sort((a, b) => b.loadedAt - a.loadedAt);
-  return covering[0] ?? null;
-}
-
-/**
- * How many planner ranges the cache keeps. A light or full round loads one range that covers
- * every view in use, so a few entries are enough.
- */
-export const MAX_PLANNER_ENTRIES = 4;
-
-/** Keeps the most recently used planner ranges. */
-export function prunePlanner(
-  planner: Readonly<Record<string, PlannerEntry>>,
-  keep: number = MAX_PLANNER_ENTRIES,
-): Record<string, PlannerEntry> {
-  const entries = Object.entries(planner).sort(([, a], [, b]) => b.usedAt - a.usedAt);
-  return Object.fromEntries(entries.slice(0, keep));
 }
 
 /**
@@ -283,8 +213,72 @@ export function isSetupStatus(value: unknown): value is SetupStatus {
   }
 }
 
+/** The parts of the cache that weigh most, each under its own key in `storage.session`. */
+const PART_KEYS = {
+  planner: 'weekrowPlanner',
+  details: 'weekrowDetails',
+  undated: 'weekrowUndated',
+  allAssignments: 'weekrowAllAssignments',
+} as const satisfies Partial<Record<keyof SessionCache, string>>;
+
+type CachePart = keyof typeof PART_KEYS;
+
+/** The key of everything else: versions, session data, limits, patches and undo records. */
+const HEAD_KEY = 'weekrowCache';
+
+const PARTS = Object.keys(PART_KEYS) as CachePart[];
+
+function emptyPart(part: CachePart): unknown {
+  return part === 'planner' ? emptyCoverage() : {};
+}
+
+/**
+ * The cache in `storage.session`. Its heavy parts live under their own keys, and a write sends
+ * only the parts that changed since the last write, so a new week's planner items do not write
+ * every assignment detail again, and the change events that reach each extension page stay small.
+ * Parts are compared by reference: the data owner replaces a part whenever it changes it.
+ */
+function createSessionCacheItem() {
+  const area = () => browser.storage.session;
+  let written = new Map<CachePart, unknown>();
+
+  return {
+    async getValue(): Promise<SessionCache | null> {
+      const stored: Record<string, unknown> = await area().get([
+        HEAD_KEY,
+        ...Object.values(PART_KEYS),
+      ]);
+      const head = stored[HEAD_KEY];
+      written = new Map();
+      if (typeof head !== 'object' || head === null) return null;
+      const value: Record<string, unknown> = { ...head };
+      for (const part of PARTS) {
+        const content = stored[PART_KEYS[part]] ?? emptyPart(part);
+        value[part] = content;
+        written.set(part, content);
+      }
+      return value as unknown as SessionCache;
+    },
+
+    async setValue(value: SessionCache | null): Promise<void> {
+      if (value === null) {
+        written = new Map();
+        await area().remove([HEAD_KEY, ...Object.values(PART_KEYS)]);
+        return;
+      }
+      const { planner, details, undated, allAssignments, ...head } = value;
+      const parts: Record<CachePart, unknown> = { planner, details, undated, allAssignments };
+      const changes: Record<string, unknown> = { [HEAD_KEY]: head };
+      const sent = PARTS.filter((part) => written.get(part) !== parts[part]);
+      for (const part of sent) changes[PART_KEYS[part]] = parts[part];
+      await area().set(changes);
+      for (const part of sent) written.set(part, parts[part]);
+    },
+  };
+}
+
 /** The cache item in `storage.session`. */
-export const sessionCacheItem = defineItem<SessionCache | null>('session:weekrowCache', () => null);
+export const sessionCacheItem = createSessionCacheItem();
 
 /** The setup status item in `storage.session`, so a service worker restart keeps it. */
 export const setupStatusItem = defineItem<SetupStatus | null>('session:weekrowSetup', () => null);
