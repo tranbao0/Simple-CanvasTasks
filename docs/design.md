@@ -655,24 +655,28 @@ Availability is a separate small marker next to the status chip, because it answ
 - Why: a student sees one list of what they still owe, so every kind of item uses the same horizon.
   The cap of 16 weeks stops one long-running course, such as an orientation course, from pulling in years of old items.
 
-**The planner request:**
+**The planner range of a view:**
 
-- Every planner request starts at the earliest horizon of the visible courses.
+- Each view needs the planner items of one range.
+  The range starts at the earliest horizon of the visible courses, or at the start of the viewed week if that is earlier.
   Older-style peer reviews come back only when the range covers the reviewer's own assignment due date [10].
   This start brings them back in the week of their real date.
-- The request ends at the end of the viewed week, or at the end of tomorrow if that is later, for the look-ahead.
+- The range ends at the end of the viewed week, or at the end of tomorrow if that is later, for the look-ahead.
 - `start_date` and `end_date` are plain UTC instants, such as `2026-11-02T04:59:59.999Z`.
   Canvas rejects a date string that has a time zone name in brackets [10].
 - `end_date` is one millisecond before the next day or week starts.
   Most Canvas planner ranges include both ends [10].
 - The planner range covers every kind of item, including work that Canvas marks missing [10].
   So the extension needs no separate request for missing work.
-- The client places every item by its own date, peer reviews included.
+- The extension does not request the whole range for each view.
+  The cache keeps the items of every request together, and a view requests only the parts of its range that the cache does not hold (decision 11, "The planner cache").
+  - One step forward from the current week requests one week.
+  - A week before the current one, back to the horizon, needs no request.
+- Every view reads all cached items, and the client places each item by its own date, peer reviews included.
   Items outside the viewed week, outside Past due and outside the Tomorrow look-ahead are dropped.
-- Every light and full round loads one range that covers all the weeks in use.
-  So a peer review whose reviewer's own due date falls in a later week that the student has viewed also shows in its real week.
+  So a peer review that the request for a later week brought back also shows in its real week.
 - Known limits:
-  - A peer review whose reviewer's own due date falls after every week in use shows only once that date is in range.
+  - A peer review whose reviewer's own due date falls after every week in the cache shows only once a view covers that date.
     This happens when the reviewer has an extension.
   - Canvas never returns an older-style peer review on an undated assignment [10].
 
@@ -767,7 +771,11 @@ Availability is a separate small marker next to the status chip, because it answ
 - The cache lives in `storage.session`.
   It is held in memory, never written to disk, and it survives service worker restarts and panel reloads.
   So decision 2 stays true, and a panel that opens while offline still has the last data.
+- The planner items, the assignment details, the undated work and the planner-off assignment lists each have their own key in `storage.session`.
+  A write sends only the parts that changed.
+  So a new week does not write every assignment detail again, and the change events that reach each extension page stay small.
 - The background keeps at most 3 requests in flight [10].
+  A free request slot goes first to a week that a surface shows, then to refresh rounds and writes, then to weeks that load ahead.
 - After each write, the background stores a change marker (a time stamp only) in `storage.local`.
   Every surface listens to `storage.onChanged` and refreshes.
   `runtime.sendMessage` does not reach content scripts, so it cannot do this job [24].
@@ -788,17 +796,47 @@ If the live gate test (decision 13) fails on a browser, that browser uses these 
 
 **Refresh triggers:**
 
-- A "Canvas page loaded" message from the content script, or a window that gains focus, refreshes the planner items only.
+- A "Canvas page loaded" message from the content script, or a window that gains focus, refreshes the planner items of the current-week range only.
   This covers sign-in, submissions and done marks made in Canvas itself.
-- A 5-minute timer refreshes everything, including the assignment details, the undated work and the override list.
+- A 5-minute timer refreshes the current-week range and everything else: the assignment details of its items, the undated work and the override list.
+- Rounds do not reload the other weeks that the student opened.
+  A cached week other than the current one shows at once.
+  When a round started after its items loaded, the week reloads its own items in the background, and after a full round also their assignment details.
+  So a week that a surface shows stays as current as the current week, and weeks that no surface shows cost no requests.
 - A write, or the change marker in `storage.local`, refreshes everything.
 - A change of the saved address refreshes everything.
 - At midnight in the Canvas time zone, the surfaces recompute the current week and the day groups.
   If the planner range changes, they also refresh the planner items.
 - At most one refresh round runs per 60 seconds.
+  Loading a week that a surface shows is not a refresh round, so it never waits for this limit or for a running round.
   A write and a change of address skip this limit.
 - The 5-minute and midnight timers run in each visible panel or in-page list, not in the background.
   A stopped service worker loses its timers [24], and this way no `alarms` permission is needed.
+
+**The planner cache:**
+
+- The cache keeps one copy of each planner item, by its item key.
+  It also keeps the spans of time for which it holds every item that Canvas returns, each with the time it loaded.
+- A view requests only the parts of its planner range (decision 9) that no span covers and no running request fetches.
+- A new week shows as soon as its planner items arrive.
+  The assignment details of new items load after that, and their chips fill in.
+  The refresh marker shows until they arrive.
+  The first load of the current week still waits for everything, so Past due does not change under the student.
+- A long part loads in up to 3 chunks side by side, so it does not page through one long chain of requests.
+  - With no cached items to go by, the chunks have the same length, at least two weeks each.
+  - Where the cache already holds the range, as in a refresh round, the chunks hold about the same number of cached items, and a range that fits in one page of 100 stays one request.
+  - Chunks do not overlap, and the cache removes duplicate items by item key.
+- When a view has shown, the weeks before and after it load in the background, with the assignment details of their work.
+  These requests have the lowest priority.
+  If the student opens such a week while it loads, its requests move to the highest priority, and no second request starts.
+  A failed load ahead shows nothing.
+- When a reloaded span no longer returns a cached item, the item is dropped.
+  Canvas files an older-style peer review under the reviewer's own due date, which the item does not carry.
+  So the cache keeps the span that returned it, and drops it only when every part of that span loads again without it.
+- To stay within the storage limits, the cache keeps the planner items of the current-week range and the next week, plus the views that surfaces showed in the last 10 minutes and the weeks next to them.
+  It drops the rest.
+- A failed load of a week that a surface shows leads to the same states as a failed round.
+  A 403 starts a full round, which finds out whether the school now limits the planner.
 
 **Requests:**
 
@@ -810,8 +848,8 @@ If the live gate test (decision 13) fails on a browser, that browser uses these 
 | Groups | `GET /api/v1/users/self/groups?per_page=100` | Once per session |
 | Course colors | `GET /api/v1/users/self/colors` | Once per session |
 | Course order | `GET /api/v1/users/self/dashboard_positions` | Once per session |
-| Week items | `GET /api/v1/planner/items?start_date=...&end_date=...&per_page=100` | Each week view |
-| Assignment details | `GET /api/v1/courses/:id/assignments?assignment_ids[]=...&include[]=submission&per_page=100` | Each week view, per course with assignment items; 5-minute timer |
+| Week items | `GET /api/v1/planner/items?start_date=...&end_date=...&per_page=100` | The parts of a view's range that the cache lacks; the weeks before and after a shown view, ahead of time; the current-week range in each light and full round, in up to 3 chunks |
+| Assignment details | `GET /api/v1/courses/:id/assignments?assignment_ids[]=...&include[]=submission&per_page=100` | New planner items, after they show, per course with assignment items; the current-week items in each full round; a shown week's items after a full round |
 | Teacher status names | `POST /api/graphql` with `customGradeStatusesConnection` for each course | Once per session, when a teacher status appears |
 | All assignments (planner turned off only) | `GET /api/v1/courses/:id/assignments?include[]=submission&per_page=100` | Instead of the planner, per course |
 | Undated work | `GET /api/v1/courses/:id/assignments?bucket=undated&...` | 5-minute timer, per course |
@@ -975,6 +1013,8 @@ These sizes come from one test build of the same small app [19].
      Release builds do not include it.
    - The widget dashboard and List View fixtures must get no injected node.
    - Screenshot tests run at 200 px, 240 px and 360 px.
+   - One test serves a slow Canvas: each answer waits 700 ms, and the planner answers only the requested range, 100 items a page with `Link: rel="next"`, over a full term of work.
+     It checks that a week loaded ahead shows within 300 ms of the click, that a past week within the horizon needs no request, and that a week not yet cached shows within one round trip and asks only for the missing week.
 4. **Firefox smoke test:** Selenium with geckodriver, run with `--allow-system-access`.
    Firefox 153 and later need this flag to open extension pages under geckodriver [19].
    The test installs the extension and checks that the content script runs and the panel page loads.
