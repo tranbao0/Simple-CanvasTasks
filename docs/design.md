@@ -48,6 +48,7 @@ This extension has no account, no server of its own and no telemetry.
 | 18 | Settings | Five settings, also shown inside the panel and the in-page list |
 | 19 | Accessibility, language and theme | WCAG 2.2 AA, English text, a Theme setting with Automatic, Light and Dark |
 | 20 | No-telemetry guarantee | One fetch wrapper that only reaches the student's Canvas |
+| 21 | Visual design | Looks like a native part of Canvas, not an add-on sidebar |
 
 ## Decisions
 
@@ -1222,6 +1223,39 @@ Septet for Canvas is the fallback.
 
 - The original's 2023 Firefox build already sent analytics and fetched remote configuration [9].
 - Both Chrome and Firefox reviewers compare the declared data use with the code [20].
+
+### 21. Visual design
+
+**Question:** What should the list look like?
+
+**Options:**
+
+- A. Look like a native part of Canvas: Canvas's font, colors, headings, rows and pills.
+- B. Keep a separate, app-like look of its own.
+
+**Decision:** A.
+The owner asked for it after testing an early build: the list should feel like part of Canvas, not like a sidebar added on top.
+
+**Rules:**
+
+- Canvas's own markup and styles are the reference: the dashboard sidebar and planner code in canvas-lms, and the InstUI theme tokens that Canvas uses [10] [13].
+- The in-page list uses the page's own font and the school's brand colors.
+  Canvas sets the brand colors as CSS custom properties on the page, such as `--ic-brand-primary`, `--ic-link-color` and `--ic-brand-font-color-dark`.
+  Custom properties pass into the shadow root, so the list reads them directly and falls back to Canvas's default colors.
+- The list sits in Canvas's right column like Canvas's own sections: the same heading style and size as "To Do" and "Coming Up", the same divider lines and spacing, and no card frame, rounded box or shadow.
+- Item rows follow Canvas's To Do and planner rows: a type icon in the course color (assignment, quiz, discussion, page, peer review, custom task), the title in the link color, and the course name and due text in Canvas's secondary text style.
+- Chips use Canvas's pill style.
+  "Missing" looks like the red Missing pill in Canvas's planner.
+- The rings keep the Canvas course colors and use Canvas's type and spacing.
+- The side panel, the settings and the welcome page use the same visual language.
+  They cannot read the school's colors, so they use Canvas's default colors.
+- The dark theme follows the same rules with Canvas's dark colors where Canvas defines them, and with matching dark values elsewhere.
+- Screenshots compare the list against Canvas's own sidebar sections on the same page, at the same widths.
+
+**Why:**
+
+- The original Tasks for Canvas felt native because it looked like Canvas's own To Do list.
+- A list that matches Canvas reads as trustworthy and calm, and it does not compete with the page for attention.
 
 ## Open risks
 
