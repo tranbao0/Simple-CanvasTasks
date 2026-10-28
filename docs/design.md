@@ -404,6 +404,7 @@ Every item that is not done stays in its day group, with its status chip (decisi
 
 - Each item has one key: the assignment id for assignment-backed items, otherwise the planner type plus the planner id.
 - Each item goes to exactly one group, chosen by its date and its state:
+  - checked, but Canvas still marks it missing: where an open item would go (see "Checked but missing" below);
   - done and dated in the viewed week: Done;
   - open and past due, in the current-week view: Past due;
   - open and due later: its day;
@@ -411,12 +412,25 @@ Every item that is not done stays in its day group, with its status chip (decisi
   - skipped: the "N skipped" line of its group (see Skip).
 - In the current-week view, Done also holds done items from earlier weeks that still have a warning chip (decision 7).
   So the warning count on the Done header covers them.
+
+**Checked but missing:**
+
+The owner chose this rule after testing: one stray click, or an untick and a retick, must never hide work that Canvas counts as missing.
+
+- When the student checks an item that Canvas marks missing, the item stays where an open item goes: in Past due, on its day in other weeks, or in No due date.
+- It shows as checked, with the red "Missing in Canvas" chip.
+- It leaves that place only when Canvas stops marking it missing (the student hands it in, it gets a grade, or the teacher changes it), or when the student skips it.
+- It counts as not done in the rings and in the past-due badge, because Canvas still counts it as missing.
+- The done mark is still saved to Canvas as usual, so unchecking and checking again only changes the checkbox, never the place.
+- Plain past-due work without the Canvas missing flag keeps the normal rule: a check moves it to Done, with Undo.
+  This covers custom tasks, pages, and outside-Canvas work with "Can't confirm".
 - Reminders (decision 7) follow their own rule: they show only on their day.
 - A status never moves an item.
   So the list renders as soon as the planner items arrive, and the chips fill in later without any item moving.
 - Done items with no due date show at the end of the No due date group, under a small "N done" line.
   So the student can undo a wrong mark at any time.
-  A done undated item with a warning chip goes to Done instead, so the Done header counts the warning.
+  A done undated item with another warning chip, such as Redo requested, goes to Done instead, so the Done header counts the warning.
+  A checked undated item that Canvas marks missing stays open in the group (see "Checked but missing").
 - When the student marks an item done, skips it or deletes a task, an "Undo" notice shows.
   The notice has no timer: it stays until the student acts again or closes it.
   Ctrl+Z (Cmd+Z on a Mac) also undoes while the notice shows.
@@ -513,7 +527,7 @@ Availability is a separate small marker next to the status chip, because it answ
 **Chips on done items:**
 
 - **Missing in Canvas:** the student checked the item off, but Canvas still marks it missing.
-  This warning shows for every hand-in method.
+  This warning shows for every hand-in method, on the checked item in its open place (decision 6, "Checked but missing").
   For work handed in outside Canvas, Canvas reports missing only when the teacher set it [10], and the tip says so.
 - **Redo requested:** the student checked off work handed in outside Canvas, but the teacher asked for a redo.
   This is a warning chip (see decision 8).
@@ -591,6 +605,7 @@ Availability is a separate small marker next to the status chip, because it answ
   In the current-week view, every course with items in Past due also has a ring.
 - A ring counts items, not points, as in the original [9].
   Skipped items and reminders do not count.
+  A checked item that Canvas still marks missing counts as not done.
 - The center of the ring shows "done/total".
   A course with no items this week shows an empty ring.
 - A ring shows a check mark at 100 percent only when the course has no item in Past due.
