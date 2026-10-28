@@ -54,6 +54,13 @@ This extension has no account, no server of its own and no telemetry.
 
 ### 1. Version 1 scope
 
+**Product scope:** the extension is a set of quality-of-life fixes for Canvas, not only a weekly list.
+The owner decided this on 2026-10-27, and wants to add other fixes later, such as a better PDF viewer.
+The weekly to-do list is the first fix, and version 1 ships only it.
+Each later fix must stay small and separate, so the extension never becomes the kind of bloated tool that it replaces.
+The name (decision 17) must therefore describe Canvas fixes in general, not only a week view.
+
+
 **Question:** What should version 1 include?
 
 **Options:**
