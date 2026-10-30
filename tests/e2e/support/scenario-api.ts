@@ -1,4 +1,5 @@
 import type { Worker } from '@playwright/test';
+import { customGradeStatusesAnswer } from '../../fixtures/graphql';
 import { IDS, type Scenario } from '../../fixtures/scenario';
 import type { FakeCanvasRoute, JsonValue } from './fake-canvas';
 
@@ -32,6 +33,8 @@ export function apiRoutes(scenario: Scenario): FakeCanvasRoute[] {
     { path: '/api/v1/planner/items', body: json(scenario.plannerItems) },
     { path: '/api/v1/planner/overrides', body: json(scenario.plannerOverrides) },
     { method: 'POST', path: '/api/v1/planner/overrides', body: json(created) },
+    // The list of the Announcements tab. A Canvas with state (CanvasState) answers it first.
+    { path: '/api/v1/announcements', body: [] },
     ...courseIds.map((id): FakeCanvasRoute => ({
       path: new RegExp(`^/api/v1/courses/${id}/assignments\\?.*bucket=undated`),
       body: json(scenario.undatedAssignments[id] ?? []),
@@ -43,17 +46,12 @@ export function apiRoutes(scenario: Scenario): FakeCanvasRoute[] {
     {
       method: 'POST',
       path: '/api/graphql',
-      body: json({
-        data: {
-          c0: {
-            customGradeStatusesConnection: {
-              nodes: (scenario.customGradeStatuses[IDS.courses.history] ?? []).map((status) => ({
-                _id: status.id,
-                name: status.name,
-              })),
-            },
-          },
-        },
+      respond: (request) => ({
+        body: json(
+          request.postData?.includes('WidgetGradeVisibility')
+            ? { data: { legacyNode: { widgetDashboardConfig: '{}' } } }
+            : customGradeStatusesAnswer(scenario, request.postData),
+        ),
       }),
     },
   ];

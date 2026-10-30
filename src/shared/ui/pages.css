@@ -1,0 +1,79 @@
+/*
+ * Rules for extension pages only: the page background and scroll bars, the side panel layout
+ * and the "Use this Canvas?" offer. The in-page shadow root never loads them, which keeps the
+ * content script small (design decision 12). Extension pages load this sheet after styles.css.
+ * The page follows the theme of its view: data-theme on the page root element.
+ * The settings and welcome pages add their own layout rules from page.css.
+ */
+
+:root {
+  color-scheme: light dark;
+  scrollbar-color: light-dark(#c7cdd1, #4a5b68) transparent;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  background: light-dark(#fff, #1b2330);
+}
+
+/* The side panel: a full-height column with a sticky header, and room at the sides. */
+
+.wr[data-surface='panel'] {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.wr[data-surface='panel'] > * {
+  padding-inline: 16px;
+}
+
+@container wr (width < 360px) {
+  .wr[data-surface='panel'] > * {
+    padding-inline: 12px;
+  }
+}
+
+@container wr (width < 240px) {
+  .wr[data-surface='panel'] > * {
+    padding-inline: 8px;
+  }
+}
+
+.wr[data-surface='panel'] .wr-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  padding-top: 12px;
+  background: var(--wr-bg);
+}
+
+.wr[data-surface='panel'] > :is(.wr-bar, .wr-settings-panel, .wr-form) {
+  padding-top: 12px;
+}
+
+/* The offer of a Canvas shows in extension pages only (design decision 5). It is a .wr-offer. */
+
+.wr-offer-title {
+  font-weight: 700;
+}
+
+.wr-offer-host {
+  color: var(--wr-text-2);
+  overflow-wrap: break-word;
+}
+
+.wr-offer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}

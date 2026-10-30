@@ -1,14 +1,15 @@
 /**
- * The in-page list on Canvas pages (design decision 4, "In-page rules"): the collapsed line while
+ * The in-page list on Canvas pages (design decision 4, "In-page rules"): the list that stays while
  * the side panel is open, course home pages, the mixed-role dashboard, pages that get nothing,
  * and the compact list.
  */
 import type { BrowserContext, Locator, Page, Worker } from '@playwright/test';
-import { DEFAULT_SETTINGS } from '../../src/lib/model/types';
+import { DEFAULT_SETTINGS } from '../../src/features/weekly-list/model/types';
 import { IDS, type Scenario } from '../fixtures/scenario';
 import { readPageFixture } from './support/fake-canvas';
 import { saveAddress, savedAddress } from './support/scenario-api';
 import {
+  addCsrfCookie,
   doneBox,
   expect,
   group,
@@ -17,21 +18,21 @@ import {
   openCanvasPage,
   saveSettings,
   serveScenario,
+  settledList,
   test,
 } from './support/weekrow';
 
 const QUIZ_3 = 'Quiz 3: Cell membranes';
-const SHOWN_IN_PANEL = 'Shown in the side panel';
 
 /**
- * Resolves when the Weekrow content script has started in the page, so a test can tell
+ * Resolves when the extension content script has started in the page, so a test can tell
  * "it ran and added nothing" from "it never ran". Call it before the page navigates.
  */
 async function watchContentScript(page: Page): Promise<() => boolean> {
   const cdp = await page.context().newCDPSession(page);
   let started = false;
   cdp.on('Runtime.executionContextCreated', ({ context }) => {
-    if (context.name === 'Weekrow for Canvas' && context.origin.startsWith('chrome-extension://')) {
+    if (context.name === 'Tools for Canvas' && context.origin.startsWith('chrome-extension://')) {
       started = true;
     }
   });
@@ -113,41 +114,49 @@ async function expandEverything(list: Locator): Promise<void> {
 }
 
 test.describe('side panel presence', () => {
-  test('collapses to one line while the panel page is open in the same window, and comes back when it closes', async ({
+  test('keeps the full list while the panel page is open in the same window, and after it closes', async ({
     context,
     page,
     background,
     extensionUrl,
   }) => {
     const { canvas } = await serveScenario(context, [{ path: '/', page: 'dashboard-card-view' }]);
+    await addCsrfCookie(context, canvas.origin);
     await openCanvasPage(page, canvas.origin);
     const list = inpageList(page);
     await expect(doneBox(list, QUIZ_3)).toBeVisible();
+    await settledList(page);
     expect(await savedAddress(background)).toBe(canvas.origin);
     const canvasWindow = await windowOfTab(background, `${canvas.origin}/*`);
+    await settledList(page);
+    const rows = await list.locator('[data-part="title"]').count();
 
     const panel = await openPanelTab(context, background, extensionUrl('sidepanel.html'), {
       windowId: canvasWindow,
     });
     await expect(doneBox(panel, QUIZ_3)).toBeVisible();
+    await page.bringToFront();
 
-    await expect(list).toHaveText(SHOWN_IN_PANEL);
-    await expect(doneBox(list, QUIZ_3)).toHaveCount(0);
+    // The Canvas page is the main home: the list stays in full beside the open panel.
+    await expect(doneBox(list, QUIZ_3)).toBeVisible();
+    await settledList(page);
+    await expect(list.getByText('Shown in the side panel')).toHaveCount(0);
+    await expect(list.locator('[data-part="title"]')).toHaveCount(rows);
+    await expect(group(list, 'past_due')).toBeVisible();
+    await expect(page.locator('#right-side .Sidebar__TodoListContainer')).toBeHidden();
 
-    // A panel in another window changes nothing here.
-    const elsewhere = await openPanelTab(context, background, extensionUrl('sidepanel.html'), {
-      newWindow: true,
-    });
-    await expect(doneBox(elsewhere, QUIZ_3)).toBeVisible();
-    await expect(list).toHaveText(SHOWN_IN_PANEL);
+    // A mark in the panel shows in the list on the page too: the quiz moves to Done.
+    await panel.bringToFront();
+    await doneBox(group(panel, 'today'), QUIZ_3).click();
+    await expect(doneBox(group(panel, 'today'), QUIZ_3)).toHaveCount(0);
+    await page.bringToFront();
+    await expect(doneBox(group(list, 'today'), QUIZ_3)).toHaveCount(0);
+    await expect(group(list, 'past_due')).toBeVisible();
 
     await panel.close();
-
-    await expect(doneBox(list, QUIZ_3)).toBeVisible();
-    await expect(list.getByText(SHOWN_IN_PANEL)).toHaveCount(0);
-    // The panel in the other window is still open, and this list stays expanded.
-    await expect(doneBox(elsewhere, QUIZ_3)).toBeVisible();
-    await expect(doneBox(list, QUIZ_3)).toBeVisible();
+    await expect(group(list, 'today')).toBeVisible();
+    await expect(group(list, 'past_due')).toBeVisible();
+    await expect(list.getByText('Shown in the side panel')).toHaveCount(0);
   });
 });
 
@@ -162,6 +171,7 @@ test.describe('course home page', () => {
     await openCanvasPage(page, canvas.origin, `/courses/${IDS.courses.biology}`);
     const list = inpageList(page);
     await expect(doneBox(list, QUIZ_3)).toBeVisible();
+    await settledList(page);
 
     await expandEverything(list);
 
@@ -177,14 +187,14 @@ test.describe('course home page', () => {
     await expect(page.locator('#right-side .Sidebar__TodoListContainer')).toBeHidden();
   });
 
-  test('shows a note with a settings link on the home page of a hidden course, and the native To Do stays', async ({
+  test('shows a note on the home page of a hidden course, whose settings show it again in place', async ({
     context,
     page,
     background,
-    extensionUrl,
   }) => {
+    // The adapter takes the course from the path, so the regular course home page stands in for the club's.
     const { canvas } = await serveScenario(context, [
-      { path: `/courses/${IDS.courses.club}`, page: 'course-home-hidden-course' },
+      { path: `/courses/${IDS.courses.club}`, page: 'course-home' },
     ]);
     await saveAddress(background, canvas.origin);
     await saveSettings(background, { ...DEFAULT_SETTINGS, hiddenCourseIds: [IDS.courses.club] });
@@ -192,15 +202,28 @@ test.describe('course home page', () => {
     await openCanvasPage(page, canvas.origin, `/courses/${IDS.courses.club}`);
 
     const list = inpageList(page);
-    await expect(list.getByText('You hid this course in Weekrow.')).toBeVisible();
+    await expect(list.getByText('You hid this course from the weekly list.')).toBeVisible();
     await expect(list.getByRole('checkbox')).toHaveCount(0);
     await expect(page.locator('#right-side .Sidebar__TodoListContainer')).toBeVisible();
     await expect(page.locator('#weekrow-hide-native-todo')).toHaveCount(0);
 
-    const opened = context.waitForEvent('page');
+    // The settings open in place, on the Canvas page.
+    const tabs = context.pages().length;
     await list.getByRole('button', { name: 'Settings' }).click();
-    const settings = await opened;
-    await expect(settings).toHaveURL(extensionUrl('options.html'));
+    await expect(list.getByRole('button', { name: 'Back' })).toBeVisible();
+    expect(context.pages()).toHaveLength(tabs);
+    const club = list.getByRole('switch', {
+      name: 'Show Intramural Ultimate Frisbee Club in my list',
+    });
+    await expect(club).not.toBeChecked();
+    await club.click();
+    await expect(club).toBeChecked();
+    await list.getByRole('button', { name: 'Back' }).click();
+
+    // The course is back, so its list shows and replaces the native To Do.
+    await expect(list.getByText('You hid this course from the weekly list.')).toHaveCount(0);
+    await expect(list.getByRole('checkbox').first()).toBeVisible();
+    await expect(page.locator('#right-side .Sidebar__TodoListContainer')).toBeHidden();
   });
 });
 
@@ -215,6 +238,7 @@ test.describe('pages with other layouts', () => {
 
     const list = inpageList(page);
     await expect(doneBox(list, QUIZ_3)).toBeVisible();
+    await settledList(page);
     await expect(page.locator('#right-side-wrapper > #weekrow-inpage + #right-side')).toHaveCount(
       1,
     );
@@ -235,7 +259,7 @@ test.describe('pages with other layouts', () => {
     await openCanvasPage(page, canvas.origin, '/courses/107');
 
     await expect.poll(ran).toBe(true);
-    // The page is Canvas, so the content script saved the address and told the background.
+    // The page is Canvas, so the detector told the background, which saved the address.
     await expect.poll(() => savedAddress(background)).toBe(canvas.origin);
     await expect
       .poll(() => canvas.requests.some((r) => r.path.startsWith('/api/v1/planner/items')))
@@ -258,12 +282,12 @@ test.describe('pages with other layouts', () => {
       );
     }
 
-    // The school's news site: the extension has no access there.
+    // The school's news site: the detector runs there, finds no Canvas marker and adds nothing.
     await page.goto('https://news.northfield.edu/');
     await expect(page.locator('h1')).toHaveText('Campus News');
     await expect(page.locator('#weekrow-inpage, weekrow-list')).toHaveCount(0);
 
-    // An instructure.com page that is not Canvas: the content script runs, and saves nothing.
+    // An instructure.com page that is not Canvas: the detector runs, and saves nothing.
     const ran = await watchContentScript(page);
     await page.goto('https://www.instructure.com/');
     await expect.poll(ran).toBe(true);
@@ -276,8 +300,21 @@ test.describe('pages with other layouts', () => {
   });
 });
 
-test.describe('compact in-page list', () => {
-  test('a group with more than 4 items shows 3 rows and "Show N more"', async ({
+test.describe('in-page list', () => {
+  test('Past due is a full group, with its rows and no summary line', async ({ context, page }) => {
+    const { canvas } = await serveScenario(context, [{ path: '/', page: 'dashboard-card-view' }]);
+    await openCanvasPage(page, canvas.origin);
+    const list = inpageList(page);
+    await expect(doneBox(list, QUIZ_3)).toBeVisible();
+    await settledList(page);
+
+    const section = group(list, 'past_due');
+    await expect(section.getByRole('button', { name: /\d+ past due/ })).toHaveCount(0);
+    await expect(mainRows(section)).toHaveCount(6);
+    await expect(section.getByRole('button', { name: /^Show \d+ more$/ })).toHaveCount(0);
+  });
+
+  test('a group with many items shows every row, with no "Show N more"', async ({
     context,
     page,
   }) => {
@@ -285,31 +322,105 @@ test.describe('compact in-page list', () => {
     await openCanvasPage(page, canvas.origin);
     const list = inpageList(page);
     await expect(doneBox(list, QUIZ_3)).toBeVisible();
+    await settledList(page);
 
-    // Past due has 6 items in full, and Tomorrow has 6.
-    for (const kind of ['past_due', 'tomorrow']) {
-      const section = group(list, kind);
-      await expect(mainRows(section), kind).toHaveCount(3);
-      const more = section.getByRole('button', { name: 'Show 3 more' });
-      await expect(more, kind).toBeVisible();
-      await more.click();
-      await expect(mainRows(section), kind).toHaveCount(6);
-      await expect(more, kind).toHaveCount(0);
-    }
+    // Tomorrow has 6 items.
+    const section = group(list, 'tomorrow');
+    await expect(mainRows(section)).toHaveCount(6);
+    await expect(section.getByRole('button', { name: /^Show \d+ more$/ })).toHaveCount(0);
   });
 
-  // Design decision 4 cuts only groups with more than 4 items, because a link that hides one
-  // item takes the same space as that item.
-  test('a group of 4 items shows all 4 rows with no "Show more"', async ({ context, page }) => {
+  test('every day, No due date and Done show in the list, with no link to the rest of the span', async ({
+    context,
+    page,
+  }) => {
     const { canvas } = await serveScenario(context, [{ path: '/', page: 'dashboard-card-view' }]);
     await openCanvasPage(page, canvas.origin);
     const list = inpageList(page);
     await expect(doneBox(list, QUIZ_3)).toBeVisible();
+    await settledList(page);
 
-    // Today has 4 items: Quiz 3, Return library books, Participation: Week 9 and Debate 2.
-    // The list renders each group in one pass, so these counts need no waiting.
-    const today = group(list, 'today');
-    expect(await today.getByRole('button', { name: /^Show \d+ more$/ }).count()).toBe(0);
-    expect(await mainRows(today).count()).toBe(4);
+    await expect(group(list, 'day').first()).toBeVisible();
+    await expect(group(list, 'no_due_date')).toHaveCount(1);
+    await expect(group(list, 'done')).toHaveCount(1);
+    await expect(list.getByRole('button', { name: /^(Next 7 days|Rest of)/ })).toHaveCount(0);
+  });
+
+  test('the chart draws at most 4 rings in the narrow column and the legend lists every class', async ({
+    context,
+    page,
+  }) => {
+    const { canvas } = await serveScenario(context, [{ path: '/', page: 'dashboard-card-view' }]);
+    await openCanvasPage(page, canvas.origin);
+    const list = inpageList(page);
+    await expect(doneBox(list, QUIZ_3)).toBeVisible();
+    await settledList(page);
+
+    const legend = await list.locator('.wr-legend-row').count();
+    const drawn = await list.locator('.wr-ring').count();
+    expect(drawn).toBeLessThanOrEqual(4);
+    if (legend > 4) {
+      // Classes with no work in the span stay out of the chart and out of the +N count.
+      await expect(list.locator('.wr-chart-more')).toHaveText(/^\+[1-9]\d*$/);
+    }
+  });
+});
+
+test.describe('in-page links and focus', () => {
+  test('each link names the region it opens with aria-controls', async ({ context, page }) => {
+    const { canvas } = await serveScenario(context, [{ path: '/', page: 'dashboard-card-view' }]);
+    await openCanvasPage(page, canvas.origin);
+    const list = inpageList(page);
+    await expect(doneBox(list, QUIZ_3)).toBeVisible();
+    await settledList(page);
+
+    const older = group(list, 'past_due').getByRole('button', { name: /\d+ older/ });
+    const links = [older, group(list, 'done').getByRole('button').first()];
+    for (const link of links) {
+      await expect(link).toHaveAttribute('aria-expanded', 'false');
+      const id = await link.getAttribute('aria-controls');
+      expect(id).toBeTruthy();
+      await expect(list.locator(`[id="${id}"]`)).toHaveCount(1);
+    }
+
+    // The region that a link opens is the element that holds the new rows.
+    const region = list.locator(`[id="${await older.getAttribute('aria-controls')}"]`);
+    await expect(region.locator('li')).toHaveCount(0);
+    await older.click();
+    await expect(older).toHaveAttribute('aria-expanded', 'true');
+    await expect(region.locator('li').first()).toBeVisible();
+  });
+
+  test('checking the last row of a group moves focus to the previous row, not to Add', async ({
+    context,
+    page,
+  }) => {
+    // Past due holds one row, and Today holds two rows.
+    const keep = new Set(['Problem set 6', QUIZ_3, 'Return library books']);
+    const { canvas } = await serveScenario(context, [{ path: '/', page: 'dashboard-card-view' }], {
+      extend(scenario) {
+        scenario.plannerItems = scenario.plannerItems.filter((item) =>
+          keep.has(item.plannable.title),
+        );
+        scenario.plannerNotes = scenario.plannerNotes.filter((note) => keep.has(note.title));
+      },
+    });
+    await addCsrfCookie(context, canvas.origin);
+    await openCanvasPage(page, canvas.origin);
+    const list = inpageList(page);
+    await expect(doneBox(list, QUIZ_3)).toBeVisible();
+    await settledList(page);
+    await settledList(page);
+
+    // The first row has a row after it, so focus moves to that row.
+    await doneBox(list, QUIZ_3).focus();
+    await page.keyboard.press('Space');
+    await expect(doneBox(list, QUIZ_3)).toHaveCount(0);
+    await expect(doneBox(list, 'Return library books')).toBeFocused();
+
+    // The last row of Today has none after it: focus goes to the row before it, in Past due.
+    await page.keyboard.press('Space');
+    await expect(doneBox(list, 'Return library books')).toHaveCount(0);
+    await expect(doneBox(list, 'Problem set 6')).toBeFocused();
   });
 });

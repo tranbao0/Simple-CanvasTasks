@@ -1,18 +1,35 @@
-import type { PlannerNote } from '../../../src/lib/canvas/types';
+import type { PlannerItem, PlannerNote, PlannerOverride } from '../../../src/shared/canvas/types';
+import { ANNOUNCEMENTS } from '../../fixtures/announcements';
 import { notePlannerItem, type FixtureContext } from '../../fixtures/canvas-json';
 import { CANVAS_ERRORS, type CanvasErrorFixture } from '../../fixtures/errors';
-import { IDS, allAssignmentsInCourse, type Scenario } from '../../fixtures/scenario';
-import type { WirePlannerItem, WirePlannerOverride } from '../../fixtures/wire-types';
+import {
+  IDS,
+  allAssignmentsInCourse,
+  plannerItemKey,
+  type Scenario,
+} from '../../fixtures/scenario';
+import { compareInstants } from '../../fixtures/time';
 import type { FakeCanvas, FakeCanvasRoute, FakeReply, RecordedRequest } from './fake-canvas';
 import { apiRoutes, json } from './scenario-api';
 
 /** A Canvas error fixture as a fake reply. */
 export function errorReply(error: CanvasErrorFixture, extraHeaders: Record<string, string> = {}) {
-  return { status: error.status, headers: { ...error.headers, ...extraHeaders }, body: error.body };
+  const contentType = error.body.startsWith('{')
+    ? 'application/json; charset=utf-8'
+    : error.body.startsWith('<')
+      ? 'text/html; charset=utf-8'
+      : 'text/plain; charset=utf-8';
+  return { status: error.status, contentType, headers: extraHeaders, body: error.body };
 }
 
 function jsonBody(request: RecordedRequest): Record<string, unknown> {
   return request.postData === null ? {} : (JSON.parse(request.postData) as Record<string, unknown>);
+}
+
+/** The course id and the topic id of a `/api/v1/courses/:id/discussion_topics/:id...` request. */
+function topicIds(request: RecordedRequest): [string, string] {
+  const parts = new URL(request.url).pathname.split('/');
+  return [parts[4] ?? '', parts[6] ?? ''];
 }
 
 function lastPathPart(request: RecordedRequest): string {
@@ -20,14 +37,14 @@ function lastPathPart(request: RecordedRequest): string {
 }
 
 /** The assignment a planner row stands for: its own id, or the id of its graded quiz or discussion. */
-function rowAssignmentId(row: WirePlannerItem): string | null {
+function rowAssignmentId(row: PlannerItem): string | null {
   if (row.plannable_type === 'assignment') return row.plannable_id;
   const id = row.plannable.assignment_id;
   return typeof id === 'string' ? id : null;
 }
 
 /** Whether an override belongs to a planner row, as Canvas matches them. */
-function overrideMatchesRow(override: WirePlannerOverride, row: WirePlannerItem): boolean {
+function overrideMatchesRow(override: PlannerOverride, row: PlannerItem): boolean {
   const assignmentId = rowAssignmentId(row);
   if (override.assignment_id !== null && assignmentId !== null) {
     return override.assignment_id === assignmentId;
@@ -59,13 +76,29 @@ export interface WriteRecord {
  * - `plannerReply` makes the planner answer with an error, for example a 500.
  * - `limited` turns on "Limited Access for Students": the planner and planner notes answer 403,
  *   and the all-assignments request answers with every assignment of the course.
+ * - `plannerPageSize` makes the planner answer as Canvas does: only the rows of the requested
+ *   range, in pages with a `Link: rel="next"` header.
  */
 export class CanvasState {
   readonly scenario: Scenario;
   /** When set, `GET /api/v1/planner/items` answers with this reply. */
   plannerReply: FakeReply | null = null;
   limited = false;
-  private readonly overrides = new Map<string, WirePlannerOverride>();
+  /**
+   * The most rows one planner page holds. `null` answers every row of the term on one page,
+   * whatever the range: the extension places items by their own dates and drops the rest.
+   */
+  plannerPageSize: number | null = null;
+  /**
+   * Called for every planner request before it is answered. A test returns a promise to hold the
+   * answer back, for example to keep the later days of a long span loading.
+   */
+  plannerGate: ((request: RecordedRequest) => Promise<void> | undefined) | null = null;
+  /** The announcements the student has read, as `courseId:topicId`. */
+  readonly readAnnouncements = new Set<string>(
+    ANNOUNCEMENTS.filter((topic) => topic.read).map((topic) => `${topic.courseId}:${topic.id}`),
+  );
+  private readonly overrides = new Map<string, PlannerOverride>();
   private readonly notes = new Map<string, NoteRecord>();
   private nextOverrideId = 99001;
   private nextNoteId = 8901;
@@ -81,7 +114,7 @@ export class CanvasState {
   }
 
   /** The current override of a planner row, by the row's type and id. */
-  overrideFor(plannableType: string, plannableId: string): WirePlannerOverride | null {
+  overrideFor(plannableType: string, plannableId: string): PlannerOverride | null {
     const row = this.scenario.plannerItems.find(
       (item) => item.plannable_type === plannableType && item.plannable_id === plannableId,
     );
@@ -97,9 +130,9 @@ export class CanvasState {
   }
 
   /** Every planner row, with the current overrides and custom tasks, ordered by date. */
-  plannerItems(): WirePlannerItem[] {
+  plannerItems(): PlannerItem[] {
     const overrides = [...this.overrides.values()];
-    const embed = (row: WirePlannerItem): WirePlannerItem => {
+    const embed = (row: PlannerItem): PlannerItem => {
       const match = overrides.find((override) => overrideMatchesRow(override, row));
       return { ...row, planner_override: match === undefined ? null : { ...match } };
     };
@@ -120,9 +153,13 @@ export class CanvasState {
     return [
       {
         path: '/api/v1/planner/items',
-        respond: () => {
+        respond: async (request) => {
+          await this.plannerGate?.(request);
           if (this.limited) return errorReply(CANVAS_ERRORS.limitedAccess);
-          return this.plannerReply ?? { body: json(this.plannerItems()) };
+          if (this.plannerReply !== null) return this.plannerReply;
+          return this.plannerPageSize === null
+            ? { body: json(this.plannerItems()) }
+            : this.plannerPage(request, this.plannerPageSize);
         },
       },
       {
@@ -154,6 +191,39 @@ export class CanvasState {
         path: /^\/api\/v1\/planner_notes\/\d+$/,
         respond: (request) => this.deleteNote(lastPathPart(request)),
       },
+      {
+        path: '/api/v1/announcements',
+        respond: (request) => this.announcementPage(request),
+      },
+      {
+        path: /^\/api\/v1\/courses\/\d+\/discussion_topics\/\d+$/,
+        respond: (request) => {
+          const [courseId, topicId] = topicIds(request);
+          const topic = ANNOUNCEMENTS.find((t) => t.courseId === courseId && t.id === topicId);
+          return topic === undefined
+            ? errorReply(CANVAS_ERRORS.notFound)
+            : { body: json(this.topicJson(topic)) };
+        },
+      },
+      {
+        method: 'PUT',
+        path: /^\/api\/v1\/courses\/\d+\/discussion_topics\/\d+\/read$/,
+        respond: (request) => {
+          const [courseId, topicId] = topicIds(request);
+          this.readAnnouncements.add(`${courseId}:${topicId}`);
+          // Canvas answers 204 with no body.
+          return { status: 204 };
+        },
+      },
+      {
+        method: 'DELETE',
+        path: /^\/api\/v1\/courses\/\d+\/discussion_topics\/\d+\/read$/,
+        respond: (request) => {
+          const [courseId, topicId] = topicIds(request);
+          this.readAnnouncements.delete(`${courseId}:${topicId}`);
+          return { status: 204 };
+        },
+      },
       ...courseIds.map((id): FakeCanvasRoute => ({
         // The all-assignments request of the planner-off list: no ids and no bucket.
         path: new RegExp(`^/api/v1/courses/${id}/assignments\\?(?!.*assignment_ids)(?!.*bucket=)`),
@@ -172,6 +242,85 @@ export class CanvasState {
     ];
   }
 
+  /**
+   * The announcements list as Canvas answers it: only the courses of `context_codes[]`, only the
+   * posts from `start_date` to `end_date` (the 14 days before today and 28 days after the start
+   * without dates), newest first, in pages of `per_page` with a `Link: rel="next"` header. The
+   * fixtures are all published, so `active_only` changes nothing here.
+   */
+  private announcementPage(request: RecordedRequest): FakeReply {
+    const url = new URL(request.url);
+    const codes = url.searchParams.getAll('context_codes[]');
+    if (codes.length === 0) return { status: 400, body: { message: 'Missing context_codes' } };
+    const day = 24 * 60 * 60 * 1000;
+    const startParam = url.searchParams.get('start_date');
+    const endParam = url.searchParams.get('end_date');
+    const start =
+      startParam === null ? Date.parse(this.scenario.now) - 14 * day : Date.parse(startParam);
+    const end = endParam === null ? start + 28 * day : Date.parse(endParam);
+    const rows = ANNOUNCEMENTS.filter(
+      (topic) =>
+        codes.includes(`course_${topic.courseId}`) &&
+        Date.parse(topic.posted_at ?? '') >= start &&
+        Date.parse(topic.posted_at ?? '') <= end,
+    ).sort((a, b) => Date.parse(b.posted_at ?? '') - Date.parse(a.posted_at ?? ''));
+    const perPage = Math.max(1, Number(url.searchParams.get('per_page') ?? '10') || 10);
+    const page = Math.max(1, Number(url.searchParams.get('page') ?? '1') || 1);
+    const pageRows = rows.slice((page - 1) * perPage, page * perPage);
+    const pageUrl = (number: number): string => {
+      const next = new URL(url);
+      next.searchParams.set('page', String(number));
+      return next.href;
+    };
+    const links = [`<${pageUrl(page)}>; rel="current"`, `<${pageUrl(1)}>; rel="first"`];
+    if (page * perPage < rows.length) links.unshift(`<${pageUrl(page + 1)}>; rel="next"`);
+    return {
+      body: json(pageRows.map((topic) => this.topicJson(topic))),
+      headers: { link: links.join(',') },
+    };
+  }
+
+  private topicJson(topic: (typeof ANNOUNCEMENTS)[number]): unknown {
+    return {
+      id: topic.id,
+      title: topic.title,
+      message: topic.message,
+      posted_at: topic.posted_at,
+      user_name: topic.user_name,
+      author: { display_name: topic.user_name },
+      context_code: `course_${topic.courseId}`,
+      read_state: this.readAnnouncements.has(`${topic.courseId}:${topic.id}`) ? 'read' : 'unread',
+    };
+  }
+
+  /**
+   * One page of the rows whose range date is inside `start_date` to `end_date`, both ends
+   * included. Older-style peer reviews match on the reviewer's own due date, as in Canvas.
+   */
+  private plannerPage(request: RecordedRequest, pageSize: number): FakeReply {
+    const url = new URL(request.url);
+    const start = url.searchParams.get('start_date');
+    const end = url.searchParams.get('end_date');
+    const perPage = Math.min(Number(url.searchParams.get('per_page') ?? '10') || 10, pageSize);
+    const page = Math.max(1, Number(url.searchParams.get('page') ?? '1') || 1);
+    const rows = this.plannerItems().filter((row) => {
+      const date = this.scenario.plannerRangeDates[plannerItemKey(row)] ?? row.plannable_date;
+      return (
+        (start === null || compareInstants(start, date) <= 0) &&
+        (end === null || compareInstants(date, end) <= 0)
+      );
+    });
+    const pageRows = rows.slice((page - 1) * perPage, page * perPage);
+    const pageUrl = (number: number): string => {
+      const next = new URL(url);
+      next.searchParams.set('page', String(number));
+      return next.href;
+    };
+    const links = [`<${pageUrl(page)}>; rel="current"`, `<${pageUrl(1)}>; rel="first"`];
+    if (page * perPage < rows.length) links.unshift(`<${pageUrl(page + 1)}>; rel="next"`);
+    return { body: json(pageRows), headers: { link: links.join(',') } };
+  }
+
   private fixtureContext(): FixtureContext {
     return {
       origin: this.scenario.origin,
@@ -179,12 +328,10 @@ export class CanvasState {
       timeZone: this.scenario.timeZone,
       userId: IDS.user,
       userName: this.scenario.self.name,
-      teacherId: IDS.teacher,
-      teacherName: 'Dr. Maya Okafor',
     };
   }
 
-  private noteRow(note: PlannerNote): WirePlannerItem {
+  private noteRow(note: PlannerNote): PlannerItem {
     const course =
       note.course_id === null
         ? null
@@ -210,16 +357,13 @@ export class CanvasState {
     );
     if (taken) return errorReply(CANVAS_ERRORS.overrideExists);
     const id = String(this.nextOverrideId++);
-    const override: WirePlannerOverride = {
+    const override: PlannerOverride = {
       id,
       plannable_type: plannableType,
       plannable_id: plannableId,
       user_id: IDS.user,
       workflow_state: 'active',
       marked_complete: body['marked_complete'] === true,
-      deleted_at: null,
-      created_at: this.scenario.now,
-      updated_at: this.scenario.now,
       dismissed: body['dismissed'] === true,
       assignment_id: assignmentId,
     };
@@ -230,11 +374,10 @@ export class CanvasState {
   private updateOverride(id: string, body: Record<string, unknown>): FakeReply {
     const current = this.overrides.get(id);
     if (current === undefined) return errorReply(CANVAS_ERRORS.notFound);
-    const updated: WirePlannerOverride = {
+    const updated: PlannerOverride = {
       ...current,
       marked_complete: body['marked_complete'] === true,
       dismissed: body['dismissed'] === true,
-      updated_at: this.scenario.now,
     };
     this.overrides.set(id, updated);
     return { body: json(updated) };

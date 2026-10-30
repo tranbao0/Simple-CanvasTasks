@@ -1,0 +1,155 @@
+/**
+ * The in-page entry flow for the content script. See docs/design.md, decisions 4, 5, 11 and 18.
+ *
+ * 1. Read the saved Canvas origin. The detector and the background save it, not this script.
+ *    Neither this script nor any other content script can read or write the extension's storage.
+ * 2. Tell the background that a Canvas page loaded, when the page is the saved Canvas.
+ * 3. Keep the list in line with the saved address. While the page origin is the saved address,
+ *    wait for the page's anchors and mount the list. Otherwise remove it and give the page its
+ *    native To Do back. The student cannot turn the list off: a minimized list is a slim bar
+ *    that the list itself draws (design decision 18).
+ *
+ * Every path removes a list that an earlier copy of the script left on the page, so a page that
+ * gets no list never keeps a frozen one with a hidden native To Do.
+ */
+import { browser } from 'wxt/browser';
+import type { CanvasPageLoadedMessage } from '../data/protocol';
+import { logFailure } from '../../../shared/platform/log';
+import { mountWhenReady, removeStaleMount, type InpageMount, type MountOptions } from './mount';
+
+/*
+ * The in-page script serves one Canvas: the saved address (docs/design.md, decision 5). The
+ * background injects the script into a page of the saved address only, and the script mounts only
+ * when the page origin equals the saved address. It never saves the address itself.
+ */
+
+/** Whether the page belongs to the saved Canvas. */
+export function isSavedCanvasOrigin(pageOrigin: string, savedOrigin: string | null): boolean {
+  return savedOrigin !== null && pageOrigin === savedOrigin;
+}
+
+/** Mounts the UI into the container and returns its removal, or `null` when nothing mounted. */
+type MountList = (mount: InpageMount) => (() => void) | null;
+
+/**
+ * What decides whether the page shows the list, as the in-page script reads it: the saved Canvas
+ * address. In the browser it comes from the background through checked messages
+ * (src/features/weekly-list/surface/pageChannel.ts), because no content script can read the
+ * extension's storage.
+ */
+export interface PageChoices {
+  origin: {
+    getValue(): Promise<string | null>;
+    watch(listener: (origin: string | null) => void): () => void;
+  };
+}
+
+export interface StartInpageOptions extends MountOptions {
+  /** Where the saved address and the settings come from. */
+  choices: PageChoices;
+  /** Defaults to the origin of the document's window. */
+  origin?: string;
+}
+
+export interface InpageController {
+  /** Stops watching and removes the list. It runs when `options.signal` aborts, too. */
+  stop(): void;
+}
+
+/** Runs a step of the page flow. A failure is logged, and the page keeps working. */
+export function attempt(step: string, run: () => void): void {
+  try {
+    run();
+  } catch (error) {
+    logFailure(step, error);
+  }
+}
+
+/**
+ * Tells the background that a page of the saved Canvas loaded, so that it refreshes the planner
+ * items (decision 11, "Refresh triggers"). A missing or stopped background is not an error here.
+ */
+async function announceCanvasPageLoaded(origin: string): Promise<void> {
+  const message: CanvasPageLoadedMessage = { type: 'weekrow:canvas-page-loaded', origin };
+  try {
+    await browser.runtime.sendMessage(message);
+  } catch {
+    // The background may be updating. The next page load or a focus change refreshes instead.
+  }
+}
+
+/**
+ * Runs the in-page flow. It renders nothing itself: `mountList` mounts the UI. The promise
+ * resolves when the first decision is made, which can be before the anchors appear.
+ */
+export async function startInpage(
+  mountList: MountList,
+  options: StartInpageOptions,
+): Promise<InpageController> {
+  const doc = options.doc ?? document;
+  const origin = options.origin ?? doc.defaultView?.location.origin ?? '';
+  const { signal, choices } = options;
+
+  /** The script stopped, so the list is off for good. */
+  let stopped = false;
+  let saved: string | null | undefined;
+  let removeList: (() => void) | null = null;
+  /** The wait for the page's anchors. A wait that ended stays until a choice removes the list. */
+  let wait: AbortController | null = null;
+
+  function onMount(mount: InpageMount): void {
+    let removal: (() => void) | null = null;
+    attempt('in-page list', () => {
+      removal = mountList(mount);
+    });
+    // A list that did not mount leaves nothing on the page, not even the column that it turned on.
+    if (removal === null) {
+      attempt('in-page list removal', () => {
+        mount.release();
+        mount.container.remove();
+      });
+    }
+    removeList = removal;
+  }
+
+  /** Brings the page in line with the choices: the list mounts when both hold, else it goes. */
+  function sync(): void {
+    if (saved === undefined) return;
+    if (signal?.aborted !== true && !stopped && isSavedCanvasOrigin(origin, saved)) {
+      if (removeList === null && wait === null) {
+        const own = new AbortController();
+        wait = own;
+        void mountWhenReady(onMount, { ...options, doc, signal: own.signal });
+      }
+      return;
+    }
+    wait?.abort();
+    wait = null;
+    const current = removeList;
+    removeList = null;
+    if (current !== null) attempt('in-page list removal', current);
+    // A copy whose signal aborted was replaced, and the list on the page belongs to the newer copy.
+    else if (signal?.aborted !== true) removeStaleMount(doc);
+  }
+
+  const stopOrigin = choices.origin.watch((next) => {
+    saved = next;
+    sync();
+  });
+  const controller: InpageController = {
+    stop() {
+      stopOrigin();
+      // A change that arrives later changes nothing: the list is off for good.
+      stopped = true;
+      sync();
+    },
+  };
+  signal?.addEventListener('abort', controller.stop, { once: true });
+
+  // A change that arrives while a read runs is newer than the read.
+  const resolved = await choices.origin.getValue();
+  if (saved === undefined) saved = resolved;
+  if (isSavedCanvasOrigin(origin, resolved)) void announceCanvasPageLoaded(origin);
+  sync();
+  return controller;
+}

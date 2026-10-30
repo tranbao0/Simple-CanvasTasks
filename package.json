@@ -1,8 +1,8 @@
 {
-  "name": "weekrow",
+  "name": "tools-for-canvas",
   "version": "0.1.0",
   "private": true,
-  "description": "Your Canvas coursework for the week, as a simple to-do list.",
+  "description": "Fixes for Canvas LMS students: a weekly to-do list, missing work and due dates.",
   "license": "GPL-3.0-only",
   "type": "module",
   "engines": {
@@ -28,12 +28,16 @@
     "test:scripts": "node --test \"scripts/**/*.test.mjs\"",
     "test:e2e": "playwright test",
     "test:firefox": "node tests/firefox/smoke.mjs",
+    "test:firefox:file-check": "node tests/firefox/file-check.mjs",
+    "test:gallery": "node tests/gallery/screenshot.mjs",
     "setup:firefox": "bash tests/firefox/install-firefox.sh",
     "check:size": "node scripts/check-size.mjs",
     "check:urls": "node scripts/check-urls.mjs",
     "check:manifest": "node scripts/check-manifest.mjs",
     "check:fetch": "node scripts/check-fetch.mjs",
-    "check": "npm run build && npm run check:size && npm run check:urls && npm run check:manifest && npm run check:fetch"
+    "check:storage": "node scripts/check-storage.mjs",
+    "check:file-check": "node scripts/check-file-check.mjs",
+    "check": "npm run build && npm run check:size && npm run check:urls && npm run check:manifest && npm run check:fetch && npm run check:storage && npm run check:file-check"
   },
   "devDependencies": {
     "@babel/core": "7.29.7",

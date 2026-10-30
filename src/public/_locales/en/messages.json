@@ -1,49 +1,117 @@
 {
   "extName": {
-    "message": "Weekrow for Canvas"
+    "message": "Tools for Canvas"
   },
   "extDescription": {
-    "message": "Your Canvas coursework for the week, as a simple to-do list."
+    "message": "Fixes for Canvas LMS students: a weekly to-do list, missing work and due dates."
   },
   "actionTitle": {
-    "message": "Open Weekrow"
+    "message": "Open Tools for Canvas"
   },
-  "appName": {
-    "message": "Weekrow"
+  "listTitle": {
+    "message": "Weekly list"
+  },
+  "minimizeList": {
+    "message": "Minimize list"
+  },
+  "expandList": {
+    "message": "Expand list"
+  },
+  "minimizedBarName": {
+    "message": "Weekly list, minimized"
+  },
+  "dueTodayCount_one": {
+    "message": "$1 due today"
+  },
+  "dueTodayCount_other": {
+    "message": "$1 due today"
+  },
+  "pastDueCount_one": {
+    "message": "$1 past due"
+  },
+  "pastDueCount_other": {
+    "message": "$1 past due"
+  },
+  "scrollRegionLabel": {
+    "message": "Tasks by day"
   },
   "weekRange": {
-    "message": "$START$ - $END$",
-    "placeholders": {
-      "start": {
-        "content": "$1"
-      },
-      "end": {
-        "content": "$2"
-      }
-    }
+    "message": "$1 - $2"
   },
-  "weekRangeLong": {
-    "message": "Week of $START$ to $END$",
-    "placeholders": {
-      "start": {
-        "content": "$1"
-      },
-      "end": {
-        "content": "$2"
-      }
-    }
+  "spanRangeLong_week": {
+    "message": "$1 to $2"
   },
-  "prevWeek": {
-    "message": "Previous week"
+  "spanRangeLong_fortnight": {
+    "message": "$1 to $2"
   },
-  "nextWeek": {
-    "message": "Next week"
+  "spanRangeLong_month": {
+    "message": "$1 to $2"
   },
-  "thisWeek": {
-    "message": "This week"
+  "spanRangeLong_custom": {
+    "message": "$1 to $2"
   },
-  "weekNav": {
-    "message": "Change week"
+  "prevSpan": {
+    "message": "Previous $1"
+  },
+  "nextSpan": {
+    "message": "Next $1"
+  },
+  "goToToday": {
+    "message": "Today"
+  },
+  "spanNav": {
+    "message": "Change span"
+  },
+  "spanPicker": {
+    "message": "Span shown"
+  },
+  "spanKind_day": {
+    "message": "Day"
+  },
+  "spanKind_week": {
+    "message": "Week"
+  },
+  "spanKind_fortnight": {
+    "message": "2 weeks"
+  },
+  "spanKind_month": {
+    "message": "Month"
+  },
+  "spanKind_custom": {
+    "message": "Custom: $1 days"
+  },
+  "spanUnit_day": {
+    "message": "day"
+  },
+  "spanUnit_week": {
+    "message": "week"
+  },
+  "spanUnit_fortnight": {
+    "message": "2 weeks"
+  },
+  "spanUnit_month": {
+    "message": "month"
+  },
+  "spanUnit_custom": {
+    "message": "$2 days"
+  },
+  "spanThis_day": {
+    "message": "on this day"
+  },
+  "spanThis_week": {
+    "message": "in these 7 days"
+  },
+  "spanThis_fortnight": {
+    "message": "in these 14 days"
+  },
+  "spanThis_month": {
+    "message": "in this month"
+  },
+  "spanThis_custom": {
+    "message": "in these $2 days"
+  },
+  "spanDaysLabel": {
+    "message": "Days"
   },
   "addTask": {
     "message": "Add task"
@@ -51,21 +119,17 @@
   "settings": {
     "message": "Settings"
   },
+  "back": {
+    "message": "Back"
+  },
+  "settingsLoading": {
+    "message": "Loading settings"
+  },
   "timesIn": {
-    "message": "Times in $ZONE$",
-    "placeholders": {
-      "zone": {
-        "content": "$1"
-      }
-    }
+    "message": "Times in $1"
   },
   "timesInLong": {
-    "message": "Times are in the Canvas time zone, $ZONE$.",
-    "placeholders": {
-      "zone": {
-        "content": "$1"
-      }
-    }
+    "message": "Times are in the Canvas time zone, $1."
   },
   "refreshing": {
     "message": "Refreshing"
@@ -74,57 +138,25 @@
     "message": "Progress by course"
   },
   "ringLabel": {
-    "message": "$COURSE$: $DONE$ of $TOTAL$ done this week",
-    "placeholders": {
-      "course": {
-        "content": "$1"
-      },
-      "done": {
-        "content": "$2"
-      },
-      "total": {
-        "content": "$3"
-      }
-    }
+    "message": "$1: $2 of $3 done $4"
   },
   "ringLabelPastDue": {
-    "message": "$COURSE$: $DONE$ of $TOTAL$ done this week, $PAST$ past due",
-    "placeholders": {
-      "course": {
-        "content": "$1"
-      },
-      "done": {
-        "content": "$2"
-      },
-      "total": {
-        "content": "$3"
-      },
-      "past": {
-        "content": "$4"
-      }
-    }
+    "message": "$1: $2 of $3 done $5, $4 past due"
+  },
+  "spanProgress": {
+    "message": "Progress $4: $1 of $2 done, $3 percent"
+  },
+  "spanComplete": {
+    "message": "Progress $2: all $1 done"
   },
   "ringCourseName": {
-    "message": "$CODE$, $NAME$",
-    "placeholders": {
-      "code": {
-        "content": "$1"
-      },
-      "name": {
-        "content": "$2"
-      }
-    }
+    "message": "$1, $2"
   },
   "personal": {
     "message": "Personal"
   },
   "filterShowing": {
-    "message": "Showing $COURSE$ only.",
-    "placeholders": {
-      "course": {
-        "content": "$1"
-      }
-    }
+    "message": "Showing $1 only."
   },
   "filterShowingOne": {
     "message": "Showing one course only."
@@ -148,161 +180,79 @@
     "message": "Done"
   },
   "nothingDue": {
-    "message": "Nothing due this week"
+    "message": "Nothing due $1"
+  },
+  "allDone": {
+    "message": "All done"
+  },
+  "lateBadge_one": {
+    "message": "$1 late"
+  },
+  "lateBadge_other": {
+    "message": "$1 late"
   },
   "itemCount_one": {
-    "message": "$COUNT$ item",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
+    "message": "$1 item"
   },
   "itemCount_other": {
-    "message": "$COUNT$ items",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
+    "message": "$1 items"
   },
   "olderCount_one": {
-    "message": "$COUNT$ older",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
+    "message": "$1 older"
   },
   "olderCount_other": {
-    "message": "$COUNT$ older",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
-  },
-  "showMore": {
-    "message": "Show $COUNT$ more",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
+    "message": "$1 older"
   },
   "skipAllOlder": {
     "message": "Skip all older"
   },
   "skippedCount_one": {
-    "message": "$COUNT$ skipped",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
+    "message": "$1 skipped"
   },
   "skippedCount_other": {
-    "message": "$COUNT$ skipped",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
+    "message": "$1 skipped"
   },
   "doneCount_one": {
-    "message": "$COUNT$ done",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
+    "message": "$1 done"
   },
   "doneCount_other": {
-    "message": "$COUNT$ done",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
+    "message": "$1 done"
   },
   "warningCount_one": {
-    "message": "$COUNT$ warning",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
+    "message": "$1 warning"
   },
   "warningCount_other": {
-    "message": "$COUNT$ warnings",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
+    "message": "$1 warnings"
   },
   "doneCheckbox": {
-    "message": "Done: $TITLE$",
-    "placeholders": {
-      "title": {
-        "content": "$1"
-      }
-    }
+    "message": "Done: $1"
   },
   "skip": {
     "message": "Skip"
   },
   "skipItem": {
-    "message": "Skip $TITLE$",
-    "placeholders": {
-      "title": {
-        "content": "$1"
-      }
-    }
+    "message": "Skip $1"
   },
   "unskip": {
     "message": "Unskip"
   },
   "unskipItem": {
-    "message": "Unskip $TITLE$",
-    "placeholders": {
-      "title": {
-        "content": "$1"
-      }
-    }
+    "message": "Unskip $1"
   },
   "moveToToday": {
     "message": "Move to today"
   },
   "moveItemToToday": {
-    "message": "Move $TITLE$ to today",
-    "placeholders": {
-      "title": {
-        "content": "$1"
-      }
-    }
+    "message": "Move $1 to today"
   },
   "editTaskItem": {
-    "message": "Edit task: $TITLE$",
-    "placeholders": {
-      "title": {
-        "content": "$1"
-      }
-    }
+    "message": "Edit task: $1"
   },
   "redoTip": {
     "message": "Resubmit in Canvas to finish this."
   },
   "dateTime": {
-    "message": "$DATE$, $TIME$",
-    "placeholders": {
-      "date": {
-        "content": "$1"
-      },
-      "time": {
-        "content": "$2"
-      }
-    }
+    "message": "$1, $2"
   },
   "checkpointReplyToTopic": {
     "message": "Reply to topic"
@@ -312,14 +262,6 @@
   },
   "peerReviewSubtitle": {
     "message": "Peer review"
-  },
-  "showTip": {
-    "message": "Show details: $CHIP$",
-    "placeholders": {
-      "chip": {
-        "content": "$1"
-      }
-    }
   },
   "chipSkipped": {
     "message": "Skipped"
@@ -337,7 +279,7 @@
     "message": "Extended"
   },
   "chipCantConfirm": {
-    "message": "Can't confirm"
+    "message": "Can't confirm: $1"
   },
   "chipPastDue": {
     "message": "Past due"
@@ -376,12 +318,7 @@
     "message": "Your teacher excused this work."
   },
   "markerOpens": {
-    "message": "Opens $DATE$",
-    "placeholders": {
-      "date": {
-        "content": "$1"
-      }
-    }
+    "message": "Opens $1"
   },
   "markerClosed": {
     "message": "Closed"
@@ -390,12 +327,7 @@
     "message": "Canvas no longer accepts a hand-in."
   },
   "staleLine": {
-    "message": "Couldn't refresh. Showing your list from $TIME$.",
-    "placeholders": {
-      "time": {
-        "content": "$1"
-      }
-    }
+    "message": "Couldn't refresh. Showing your list from $1."
   },
   "offline": {
     "message": "You're offline."
@@ -404,26 +336,13 @@
     "message": "Retry"
   },
   "skippedCourses": {
-    "message": "Couldn't load $COURSES$.",
-    "placeholders": {
-      "courses": {
-        "content": "$1"
-      }
-    }
+    "message": "Couldn't load $1."
   },
   "listAnd": {
-    "message": "$FIRST$ and $LAST$",
-    "placeholders": {
-      "first": {
-        "content": "$1"
-      },
-      "last": {
-        "content": "$2"
-      }
-    }
+    "message": "$1 and $2"
   },
   "offerUse": {
-    "message": "Use this Canvas?"
+    "message": "Use $1 as your Canvas?"
   },
   "offerSwitch": {
     "message": "Switch to this Canvas?"
@@ -441,26 +360,13 @@
     "message": "Your school limits the Canvas planner. Pages, ungraded discussions, ungraded quizzes, peer reviews, discussions with reply due dates and your own tasks can't show."
   },
   "hiddenCourses_one": {
-    "message": "$COUNT$ course hidden",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
+    "message": "$1 course hidden"
   },
   "hiddenCourses_other": {
-    "message": "$COUNT$ courses hidden",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
+    "message": "$1 courses hidden"
   },
   "hiddenCourseHere": {
-    "message": "You hid this course in Weekrow."
-  },
-  "shownInPanel": {
-    "message": "Shown in the side panel"
+    "message": "You hid this course from the weekly list."
   },
   "undo": {
     "message": "Undo"
@@ -469,50 +375,25 @@
     "message": "Marked done"
   },
   "undoDone_other": {
-    "message": "$COUNT$ marked done",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
+    "message": "$1 marked done"
   },
   "undoSkipped_one": {
     "message": "Skipped"
   },
   "undoSkipped_other": {
-    "message": "$COUNT$ skipped",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
+    "message": "$1 skipped"
   },
   "undoSkippedAll_one": {
-    "message": "Skipped $COUNT$ older item",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
+    "message": "Skipped $1 older item"
   },
   "undoSkippedAll_other": {
-    "message": "Skipped $COUNT$ older items",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
+    "message": "Skipped $1 older items"
   },
   "undoDeleted_one": {
     "message": "Task deleted"
   },
   "undoDeleted_other": {
-    "message": "$COUNT$ tasks deleted",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
+    "message": "$1 tasks deleted"
   },
   "closeNotice": {
     "message": "Close notice"
@@ -523,97 +404,41 @@
   "noteFirstSkip": {
     "message": "Skipping also hides this item in Canvas's list of missing work."
   },
+  "moreNotices_one": {
+    "message": "$1 more notice"
+  },
+  "moreNotices_other": {
+    "message": "$1 more notices"
+  },
   "gotIt": {
     "message": "Got it"
   },
   "loading": {
     "message": "Loading your list"
   },
+  "loadingPastDue": {
+    "message": "Loading past due…"
+  },
   "setupTitle": {
-    "message": "Connect your Canvas"
+    "message": "Open your Canvas to see your list"
   },
   "setupIntro": {
-    "message": "Open Canvas in a tab and click the Weekrow button there. Or type the address you use to sign in to Canvas."
-  },
-  "changeTitle": {
-    "message": "Change your Canvas address"
-  },
-  "addressLabel": {
-    "message": "Canvas address"
-  },
-  "addressPlaceholder": {
-    "message": "school.instructure.com"
-  },
-  "addressInvalid": {
-    "message": "Enter a web address, such as school.instructure.com."
+    "message": "Open your school's Canvas in a browser tab. Tools for Canvas finds it by itself."
   },
   "allowAccess": {
     "message": "Allow access"
   },
-  "allowAccessHint": {
-    "message": "Your browser then asks you to let Weekrow read this site. Weekrow talks only to your Canvas."
-  },
-  "checking": {
-    "message": "Checking $HOST$",
-    "placeholders": {
-      "host": {
-        "content": "$1"
-      }
-    }
-  },
   "noAccessTitle": {
-    "message": "Weekrow needs access to your Canvas"
+    "message": "Tools for Canvas needs access to your Canvas"
   },
   "noAccessBody": {
-    "message": "Allow access to $HOST$ to show your list.",
-    "placeholders": {
-      "host": {
-        "content": "$1"
-      }
-    }
-  },
-  "redirectsTitle": {
-    "message": "This address redirects"
-  },
-  "redirectsBody": {
-    "message": "Open Canvas in a tab and sign in. Then click the Weekrow button in the toolbar while that tab is open."
-  },
-  "notCanvasTitle": {
-    "message": "This address is not a Canvas site"
-  },
-  "notCanvasBody": {
-    "message": "Check the address and try again."
-  },
-  "unreachableTitle": {
-    "message": "Couldn't reach $HOST$",
-    "placeholders": {
-      "host": {
-        "content": "$1"
-      }
-    }
-  },
-  "unreachableBody": {
-    "message": "Check the address."
+    "message": "Allow access to $1 to show your list."
   },
   "signedOutTitle": {
     "message": "You're signed out of Canvas"
   },
   "signedOutButton": {
     "message": "Open Canvas to sign in"
-  },
-  "wrongAddress": {
-    "message": "Wrong address?"
-  },
-  "changeIt": {
-    "message": "Change it"
-  },
-  "keepUsing": {
-    "message": "Keep using $HOST$",
-    "placeholders": {
-      "host": {
-        "content": "$1"
-      }
-    }
   },
   "firefoxPrivateHint": {
     "message": "In a private window or a container tab, Firefox keeps a separate sign-in. Sign in to Canvas in a normal window."
@@ -622,18 +447,19 @@
     "message": "No active courses"
   },
   "noCoursesBody": {
-    "message": "Canvas shows no active courses for you at $HOST$.",
-    "placeholders": {
-      "host": {
-        "content": "$1"
-      }
-    }
+    "message": "Canvas shows no active courses for you at $1."
   },
   "cantLoadTitle": {
     "message": "Couldn't load your list"
   },
   "taskNew": {
     "message": "New task"
+  },
+  "taskSaving": {
+    "message": "Saving"
+  },
+  "taskSaveFailed": {
+    "message": "Couldn't save the task. Try again."
   },
   "taskEdit": {
     "message": "Edit task"
@@ -654,12 +480,7 @@
     "message": "Time"
   },
   "taskTimeHint": {
-    "message": "With no time, the task is set for $TIME$.",
-    "placeholders": {
-      "time": {
-        "content": "$1"
-      }
-    }
+    "message": "With no time, the task is set for $1."
   },
   "taskCourse": {
     "message": "Course"
@@ -686,39 +507,64 @@
     "message": "Close"
   },
   "settingsTitle": {
-    "message": "Weekrow settings"
+    "message": "Settings"
   },
-  "settingWeekStart": {
-    "message": "First day of the week"
+  "supportLead": {
+    "message": "Like these tools?"
   },
-  "weekStartAuto": {
-    "message": "Automatic, from your Canvas language"
+  "supportLink": {
+    "message": "Support on Ko-fi"
   },
-  "settingHiddenCourses": {
-    "message": "Hidden courses"
+  "settingSpan": {
+    "message": "Shown span"
   },
-  "hiddenCoursesHelp": {
-    "message": "Hide a course, such as a club or an orientation course. Its work leaves your list and your rings."
+  "settingCourses": {
+    "message": "Show in my list"
   },
-  "hideCourse": {
-    "message": "Hide $COURSE$",
-    "placeholders": {
-      "course": {
-        "content": "$1"
-      }
-    }
+  "coursesHelp": {
+    "message": "Turn off a course, such as a club or an orientation course, to remove its work from your list and your rings."
+  },
+  "showCourse": {
+    "message": "Show $1 in my list"
   },
   "noCoursesYet": {
-    "message": "Your courses show here after Weekrow loads your list."
+    "message": "Your courses show here after your list loads."
+  },
+  "settingFixes": {
+    "message": "New dashboard fixes"
+  },
+  "fixesHelp": {
+    "message": "Small fixes for the widgets of the new Canvas dashboard. Each one works on its own."
+  },
+  "fixCourseColors": {
+    "message": "Course colors on Course work icons"
+  },
+  "fixAnnouncements": {
+    "message": "Announcements in place"
+  },
+  "fixCourseWork": {
+    "message": "Course work extras"
+  },
+  "fixCourseGrades": {
+    "message": "All course grades"
   },
   "settingShowRings": {
     "message": "Show progress rings"
   },
-  "settingShowOnCanvas": {
-    "message": "Show Weekrow on Canvas pages"
+  "settingTheme": {
+    "message": "Theme"
   },
-  "showOnCanvasHelp": {
-    "message": "Shows on the Card View and Recent Activity dashboards and on course home pages. On other pages, use the side panel."
+  "themeAuto": {
+    "message": "Automatic"
+  },
+  "themeLight": {
+    "message": "Light"
+  },
+  "themeDark": {
+    "message": "Dark"
+  },
+  "themeHelp": {
+    "message": "Automatic follows your browser or system. On Canvas pages, the list follows the page."
   },
   "settingAddress": {
     "message": "Canvas address"
@@ -726,59 +572,214 @@
   "addressNotSet": {
     "message": "Not set"
   },
-  "changeAddress": {
-    "message": "Change"
+  "addressHelp": {
+    "message": "The first Canvas page you open sets it. To use another Canvas, open it and choose Switch in the side panel."
   },
   "welcomeTitle": {
-    "message": "Welcome to Weekrow"
+    "message": "Welcome to Tools for Canvas"
   },
   "welcomeIntro": {
-    "message": "Your Canvas coursework for the week, as a simple to-do list."
+    "message": "Fixes for Canvas LMS students, starting with a weekly to-do list."
+  },
+  "welcomeOpenCanvasTitle": {
+    "message": "Open your Canvas"
+  },
+  "welcomeListBody": {
+    "message": "Your list shows on the Canvas dashboard and on course home pages."
   },
   "welcomePinTitle": {
-    "message": "Pin the Weekrow button"
+    "message": "Pin the Tools for Canvas button"
   },
   "welcomePinChrome": {
-    "message": "Click the Extensions button (the puzzle piece) in the toolbar. Then click the pin next to Weekrow for Canvas."
+    "message": "Click the Extensions button (the puzzle piece) in the toolbar. Then click the pin next to Tools for Canvas."
   },
   "welcomePinEdge": {
-    "message": "Click the Extensions button (the puzzle piece) in the toolbar. Then click the eye next to Weekrow for Canvas."
+    "message": "Click the Extensions button (the puzzle piece) in the toolbar. Then click the eye next to Tools for Canvas."
   },
   "welcomePinFirefox": {
-    "message": "Click the Extensions button (the puzzle piece) in the toolbar. Then click the gear next to Weekrow for Canvas and choose Pin to Toolbar."
+    "message": "Click the Extensions button (the puzzle piece) in the toolbar. Then click the gear next to Tools for Canvas and choose Pin to Toolbar."
   },
-  "welcomeOpenTitle": {
-    "message": "Open your list"
+  "welcomePanelTitle": {
+    "message": "Use the side panel"
   },
-  "welcomeOpenBody": {
-    "message": "Click the Weekrow button to open or close your list in the side panel."
+  "welcomePanelBody": {
+    "message": "On any page, click the Tools for Canvas button to open or close your list in the side panel."
   },
-  "welcomeOpenBodyFirefox": {
-    "message": "Click the Weekrow button to open or close your list in the sidebar."
+  "welcomePanelBodyFirefox": {
+    "message": "On any page, click the Tools for Canvas button to open or close your list in the sidebar."
   },
   "welcomeShortcut": {
-    "message": "You can also press $KEYS$.",
-    "placeholders": {
-      "keys": {
-        "content": "$1"
-      }
-    }
+    "message": "You can also press $1."
   },
   "welcomeNoShortcut": {
     "message": "You can also set a keyboard shortcut on the extension shortcuts page of your browser."
   },
-  "welcomeConnectTitle": {
-    "message": "Connect your Canvas"
-  },
   "welcomeReady": {
-    "message": "All set. Weekrow uses $HOST$.",
-    "placeholders": {
-      "host": {
-        "content": "$1"
-      }
-    }
+    "message": "All set. Tools for Canvas uses $1."
   },
   "welcomeReadyNext": {
-    "message": "Click the Weekrow button to see your week."
+    "message": "Open your Canvas dashboard to see your week."
+  },
+  "annShowLess": {
+    "message": "Show less"
+  },
+  "annLoading": {
+    "message": "Loading the announcement…"
+  },
+  "annFailed": {
+    "message": "Couldn't load the announcement."
+  },
+  "annOpenOnCanvas": {
+    "message": "Open it on Canvas"
+  },
+  "annCourseFilter": {
+    "message": "Course filter:"
+  },
+  "annAllCourses": {
+    "message": "All courses"
+  },
+  "annReadMore": {
+    "message": "Read more"
+  },
+  "annSentBy": {
+    "message": "Sent by $1"
+  },
+  "annEmptyUnread": {
+    "message": "No unread announcements"
+  },
+  "annEmptyRead": {
+    "message": "No read announcements"
+  },
+  "annEmptyAll": {
+    "message": "No recent announcements"
+  },
+  "annListFailed": {
+    "message": "Couldn't load the announcements of this course."
+  },
+  "annListLoading": {
+    "message": "Loading announcements…"
+  },
+  "annShowMore": {
+    "message": "Show more"
+  },
+  "alsoDue": {
+    "message": "Also due"
+  },
+  "alsoDueShowAll": {
+    "message": "Show all"
+  },
+  "alsoDueShowFewer": {
+    "message": "Show fewer"
+  },
+  "alsoDueNoDate": {
+    "message": "No due date"
+  },
+  "alsoDueOverdue": {
+    "message": "Overdue"
+  },
+  "alsoDueTypeAssignment": {
+    "message": "Assignment"
+  },
+  "alsoDueTypeQuiz": {
+    "message": "Quiz"
+  },
+  "alsoDueTypeDiscussion": {
+    "message": "Discussion"
+  },
+  "alsoDueTypePage": {
+    "message": "Page"
+  },
+  "alsoDueTypeNote": {
+    "message": "Task"
+  },
+  "alsoDueTypeOther": {
+    "message": "Work"
+  },
+  "alsoDueAria": {
+    "message": "Also due, sorted by due date"
+  },
+  "gradeNA": {
+    "message": "N/A"
+  },
+  "alsoDueCountUndated": {
+    "message": "$1 with no due date"
+  },
+  "alsoDueCountOverdue": {
+    "message": "$1 overdue"
+  },
+  "alsoDueCountTodo": {
+    "message": "$1 to-do in the next 14 days"
+  },
+  "alsoDueInfo": {
+    "message": "The Due card counts the next 90 days. Missing and Submitted count every date. This list adds the work that the list above leaves out."
+  },
+  "undoAnnouncementRead_one": {
+    "message": "Marked as read"
+  },
+  "undoAnnouncementRead_other": {
+    "message": "$1 marked as read"
+  },
+  "listTabs": {
+    "message": "Weekly list view"
+  },
+  "tabTasks": {
+    "message": "Tasks"
+  },
+  "tabAnnouncements": {
+    "message": "Announcements"
+  },
+  "tabAnnouncementsUnread": {
+    "message": "Announcements, $1 unread"
+  },
+  "feedRegion": {
+    "message": "Announcements"
+  },
+  "showRead": {
+    "message": "Show read"
+  },
+  "feedLoading": {
+    "message": "Loading announcements"
+  },
+  "feedEmpty": {
+    "message": "No announcements in the last 14 days."
+  },
+  "feedEmptyUnread": {
+    "message": "No unread announcements in the last 14 days."
+  },
+  "feedFailed": {
+    "message": "Couldn't load your announcements"
+  },
+  "feedUnread": {
+    "message": "Unread"
+  },
+  "feedMarkRead": {
+    "message": "Mark as read"
+  },
+  "feedMarkReadItem": {
+    "message": "Mark as read: $1"
+  },
+  "feedShowLess": {
+    "message": "Show less"
+  },
+  "feedOpen": {
+    "message": "Open in Canvas"
+  },
+  "feedOpenNote": {
+    "message": "Canvas marks the announcement as read when you open it there."
+  },
+  "feedMessageLoading": {
+    "message": "Loading the message"
+  },
+  "feedMessageFailed": {
+    "message": "Couldn't load the message."
+  },
+  "feedToday": {
+    "message": "Today"
+  },
+  "feedYesterday": {
+    "message": "Yesterday"
+  },
+  "feedDaysAgo": {
+    "message": "$1 days ago"
   }
 }

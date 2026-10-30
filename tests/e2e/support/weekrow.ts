@@ -1,11 +1,17 @@
 import type { BrowserContext, Locator, Page, Worker } from '@playwright/test';
-import type { Settings } from '../../../src/lib/model/types';
+import type { ToolsSettings } from '../../../src/shared/settings/tools';
+import type { Settings } from '../../../src/features/weekly-list/model/types';
 import { FIXTURE_READY_SELECTOR } from '../../fixtures/pages';
 import { SCENARIO_NOW, buildScenario, type Scenario } from '../../fixtures/scenario';
 import { CanvasState } from './canvas-state';
 import { setBackgroundClock } from './clock';
 import { expect, test as base } from './extension';
-import { serveFakeCanvas, type FakeCanvas, type FakeCanvasRoute } from './fake-canvas';
+import {
+  serveFakeCanvas,
+  type FakeCanvas,
+  type FakeCanvasRoute,
+  type RecordedRequest,
+} from './fake-canvas';
 import type { StorageArea } from './scenario-api';
 
 export { expect };
@@ -39,17 +45,42 @@ export interface ServedCanvas {
   scenario: Scenario;
 }
 
+export interface ScenarioOptions {
+  /** Changes the scenario before the fake serves it, such as adding a term of work. */
+  extend?: (scenario: Scenario) => void;
+  /** How long every answer waits. See `FakeCanvasOptions.latencyMs`. */
+  latencyMs?: number;
+  /** See `CanvasState.plannerPageSize`. */
+  plannerPageSize?: number;
+  /** See `CanvasState.plannerGate`. */
+  plannerGate?: (request: RecordedRequest) => Promise<void> | undefined;
+  /** The instant the scenario is built around. Defaults to `SCENARIO_NOW`. */
+  now?: string;
+  /** The origin of the Canvas. Defaults to the fake Canvas origin. */
+  origin?: string;
+  /** Serves this Canvas next to one that is already served. See `FakeCanvasOptions.alongside`. */
+  alongside?: boolean;
+}
+
 /**
- * Serves the scenario Canvas with state at `https://school.instructure.com`. Page routes and
- * other overrides go first, so they win over the API.
+ * Serves the scenario Canvas with state at `https://school.instructure.com`, or at the origin of
+ * the options. Page routes and other overrides go first, so they win over the API.
  */
 export async function serveScenario(
   context: BrowserContext,
   first: readonly FakeCanvasRoute[] = [],
+  options: ScenarioOptions = {},
 ): Promise<ServedCanvas> {
-  const scenario = buildScenario(SCENARIO_NOW);
+  const scenario = buildScenario(options.now ?? SCENARIO_NOW);
+  options.extend?.(scenario);
   const state = new CanvasState(scenario);
-  const canvas = await serveFakeCanvas(context, [...first, ...state.routes()]);
+  state.plannerPageSize = options.plannerPageSize ?? null;
+  state.plannerGate = options.plannerGate ?? null;
+  const canvas = await serveFakeCanvas(context, [...first, ...state.routes()], {
+    latencyMs: options.latencyMs,
+    origin: options.origin,
+    alongside: options.alongside,
+  });
   return { canvas, state, scenario };
 }
 
@@ -92,9 +123,17 @@ export async function saveSettings(worker: Worker, settings: Settings): Promise<
   }, settings);
 }
 
-/** The in-page list container that the extension adds before `#right-side`. */
+/** Saves the switches of the small tools as the settings page does. */
+export async function saveTools(worker: Worker, tools: ToolsSettings): Promise<void> {
+  await worker.evaluate(async (value) => {
+    const api = (globalThis as unknown as { chrome: { storage: { local: StorageArea } } }).chrome;
+    await api.storage.local.set({ toolsSettings: value });
+  }, tools);
+}
+
+/** The in-page list container that the extension adds to the page. */
 export function inpageList(page: Page): Locator {
-  return page.locator('#right-side-wrapper > #weekrow-inpage');
+  return page.locator('#weekrow-inpage');
 }
 
 /** A group of the list, such as `past_due`, `today` or `day`. */
@@ -104,7 +143,7 @@ export function group(scope: Page | Locator, kind: string): Locator {
 
 /** The rows a group shows in its main list, without "N older", "N skipped" or "N done" lines. */
 export function mainRows(section: Locator): Locator {
-  return section.locator(':scope > div > div > ul:not(.wr-sublist) > li');
+  return section.locator(':scope > div > ul:not(.wr-sublist) > li');
 }
 
 /** The checkbox of an item, by its title. */

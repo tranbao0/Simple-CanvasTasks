@@ -9,6 +9,7 @@ import { advanceBackgroundClock } from './support/clock';
 import { serveFakeCanvas } from './support/fake-canvas';
 import { saveAddress } from './support/scenario-api';
 import {
+  addCsrfCookie,
   doneBox,
   expect,
   inpageList,
@@ -29,7 +30,7 @@ const STALE_LINE = "Couldn't refresh. Showing your list from 2:00 pm.";
 const LATER_MS = 6 * 60_000;
 
 test.describe('signed out', () => {
-  test('shows the saved address and a button that opens Canvas to sign in', async ({
+  test('shows the saved address and a button that opens Canvas to sign in, with no address form', async ({
     context,
     page,
     background,
@@ -46,8 +47,7 @@ test.describe('signed out', () => {
 
     await expect(page.getByRole('heading', { name: "You're signed out of Canvas" })).toBeVisible();
     await expect(page.getByText('school.instructure.com', { exact: true })).toBeVisible();
-    await expect(page.getByText('Wrong address?')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Change it' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Change it' })).toHaveCount(0);
     // A 401 alone is not enough: the sign-in check confirmed it.
     expect(canvas.requests.map((r) => r.path)).toContain('/api/v1/users/self');
 
@@ -55,6 +55,31 @@ test.describe('signed out', () => {
     await page.getByRole('button', { name: 'Open Canvas to sign in' }).click();
     const tab = await opened;
     await expect(tab).toHaveURL(`${canvas.origin}/`);
+  });
+});
+
+test.describe('notice queue', () => {
+  test('keeps the empty live region displayed, so the first notice is announced', async ({
+    context,
+    page,
+    background,
+    extensionUrl,
+  }) => {
+    const { canvas } = await serveScenario(context);
+    await saveAddress(background, canvas.origin);
+    await openExtensionPage(page, extensionUrl('sidepanel.html'));
+    await expect(doneBox(page, QUIZ_3)).toBeVisible();
+    await settledList(page);
+
+    const queue = page.locator('.wr-notices');
+    await expect(queue).toHaveCount(1);
+    await expect(queue).toHaveAttribute('role', 'status');
+    await expect(queue).toBeEmpty();
+    // `display: none` would take the region out of the accessibility tree.
+    const display = await queue.evaluate((el) => getComputedStyle(el).display);
+    expect(display).not.toBe('none');
+    // An empty region takes no room.
+    expect((await queue.boundingBox())?.height).toBe(0);
   });
 });
 
@@ -102,6 +127,43 @@ test.describe('planner turned off', () => {
       );
     }
     expect(paths.filter((path) => path.startsWith('/api/v1/planner_notes'))).toEqual([]);
+  });
+
+  test('shows one notice at a time: the one-time note first, then the limited line', async ({
+    context,
+    page,
+    background,
+    extensionUrl,
+  }) => {
+    const { canvas, state } = await serveScenario(context);
+    state.limited = true;
+    await addCsrfCookie(context, canvas.origin);
+    await saveAddress(background, canvas.origin);
+    await openExtensionPage(page, extensionUrl('sidepanel.html'));
+    const queue = page.locator('.wr-notices');
+    await expect(queue).toContainText(LIMITED_LINE);
+    await expect(page.locator('.wr-notices-more')).toHaveCount(0);
+    await settledList(page);
+
+    await doneBox(page, QUIZ_3).click();
+
+    // The note, which the student can close, comes before the line that stays.
+    await expect(queue).toContainText('Done marks sync to Canvas');
+    await expect(queue).not.toContainText(LIMITED_LINE);
+    await expect(page.locator('.wr-notices-more')).toHaveText('1 more notice');
+    await expect(queue).toHaveAttribute('role', 'status');
+    await expect(queue.locator('[role]')).toHaveCount(0);
+    // The count is outside the live region, so it never makes the region read the notice again.
+    await expect(queue.locator('.wr-notices-more')).toHaveCount(0);
+    // The Add button still names its reason while the line waits.
+    await expect(page.getByRole('button', { name: 'Add task' })).toHaveAccessibleDescription(
+      LIMITED_LINE,
+    );
+
+    await page.getByRole('button', { name: 'Got it' }).click();
+
+    await expect(queue).toContainText(LIMITED_LINE);
+    await expect(page.locator('.wr-notices-more')).toHaveCount(0);
   });
 });
 
@@ -182,7 +244,7 @@ test.describe("can't refresh", () => {
 /** The other Canvas the student opened the panel from, which the panel offers to switch to. */
 const OTHER_CANVAS = 'https://other.instructure.com';
 
-/** Stores the "Switch to this Canvas?" offer, as a toolbar click on another Canvas tab does. */
+/** Stores the "Switch to this Canvas?" offer, as the detector of another Canvas tab does. */
 async function offerOtherCanvas(worker: Worker): Promise<void> {
   await worker.evaluate(async (origin) => {
     const api = (
@@ -190,7 +252,7 @@ async function offerOtherCanvas(worker: Worker): Promise<void> {
         chrome: { storage: { session: { set(items: object): Promise<void> } } };
       }
     ).chrome;
-    await api.storage.session.set({ offer: { origin, mode: 'switch' } });
+    await api.storage.session.set({ offer: { origin } });
   }, OTHER_CANVAS);
 }
 

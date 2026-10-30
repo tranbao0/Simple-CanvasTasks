@@ -4,14 +4,9 @@
  * and all cached data, so one student never sees another student's work on a shared computer.
  */
 import type { Page } from '@playwright/test';
+import type { Course, PlannerItem, Profile, UserSelf } from '../../src/shared/canvas/types';
 import { IDS, type Scenario } from '../fixtures/scenario';
-import type {
-  WireAssignment,
-  WireCourse,
-  WirePlannerItem,
-  WireProfile,
-  WireUserSelf,
-} from '../fixtures/wire-types';
+import type { WireAssignment } from '../fixtures/wire-types';
 import { advanceBackgroundClock } from './support/clock';
 import { serveFakeCanvas, type FakeCanvas, type FakeCanvasRoute } from './support/fake-canvas';
 import { json, saveAddress } from './support/scenario-api';
@@ -31,6 +26,7 @@ import {
 const QUIZ_3 = 'Quiz 3: Cell membranes';
 const LAB_7 = 'Lab 7: Titration notebook';
 const SKETCHBOOK = 'Figure drawing sketchbook';
+const ANNOUNCEMENT_TITLE = 'Lab room change for Thursday';
 const ART_COURSE = 'ART 150: Drawing I';
 const ART_ID = '301';
 const ASSIGNMENT_ID = '7001';
@@ -39,10 +35,10 @@ const SECOND_USER_ID = '6603';
 const AFTER_LIMIT_MS = 2 * 60_000;
 
 interface SecondStudent {
-  self: WireUserSelf;
-  profile: WireProfile;
-  course: WireCourse;
-  row: WirePlannerItem;
+  self: UserSelf;
+  profile: Profile;
+  course: Course;
+  row: PlannerItem;
   assignment: WireAssignment;
 }
 
@@ -60,10 +56,6 @@ function forSecondStudent<T>(value: T): T {
     ['4003', ASSIGNMENT_ID],
     [IDS.user, SECOND_USER_ID],
     ['Jordan Rivera', 'Sam Okafor'],
-    ['Rivera, Jordan', 'Okafor, Sam'],
-    ['jrivera', 'sokafor'],
-    ['Jordan', 'Sam'],
-    ['Rivera', 'Okafor'],
   ];
   let text = JSON.stringify(value);
   for (const [from, to] of replacements) text = text.replaceAll(from, to);
@@ -99,6 +91,7 @@ function secondStudentRoutes(student: SecondStudent): FakeCanvasRoute[] {
     { path: '/api/v1/users/self/dashboard_positions', body: json({ dashboard_positions: {} }) },
     { path: '/api/v1/planner/items', body: json([student.row]) },
     { path: '/api/v1/planner/overrides', body: json([]) },
+    { path: '/api/v1/announcements', body: json([]) },
     {
       path: new RegExp(`^/api/v1/courses/${ART_ID}/assignments\\?.*bucket=undated`),
       body: json([]),
@@ -136,6 +129,8 @@ test('a different student signs in between rounds, and nothing of the first stud
   await expect(doneBox(page, QUIZ_3)).toBeVisible();
   await settledList(page);
   expect(await sessionStorageText(page)).toContain(LAB_7);
+  // The panel also loads the announcements of the first student, which must not outlive them.
+  await expect.poll(() => sessionStorageText(page)).toContain(ANNOUNCEMENT_TITLE);
 
   // The first student deletes a task, and the Undo notice stays open.
   const toast = page.locator('.wr-toast');
@@ -154,9 +149,11 @@ test('a different student signs in between rounds, and nothing of the first stud
   await openCanvasPage(canvasTab, second.origin);
 
   // The page load starts a round. Its sign-in check finds the new user, and the round loads the
-  // second student from scratch. The panel page is open in this window, so the in-page list is
-  // one line.
-  await expect(inpageList(canvasTab)).toContainText('Shown in the side panel');
+  // second student from scratch. The in-page list shows in full beside the open panel page.
+  await expect(doneBox(inpageList(canvasTab), SKETCHBOOK)).toBeVisible();
+  for (const title of [QUIZ_3, LAB_7]) {
+    await expect(inpageList(canvasTab).getByText(title)).toHaveCount(0);
+  }
   await expect
     .poll(() => second.requests.some((r) => r.path.startsWith('/api/v1/users/self/profile')))
     .toBe(true);
@@ -168,8 +165,8 @@ test('a different student signs in between rounds, and nothing of the first stud
   for (const title of [QUIZ_3, LAB_7, 'Return library books']) {
     await expect(page.getByText(title)).toHaveCount(0);
   }
-  await expect(page.locator('.wr-ring')).toHaveCount(1);
-  await expect(page.locator('.wr-ring-label')).toHaveText(['ART 150']);
+  await expect(page.locator('.wr-chart')).toHaveCount(1);
+  await expect(page.locator('.wr-legend-code')).toHaveText(['ART 150']);
   await page.keyboard.press('Control+z');
 
   await page.getByRole('button', { name: 'Add task' }).click();
@@ -179,7 +176,16 @@ test('a different student signs in between rounds, and nothing of the first stud
 
   const cached = await sessionStorageText(page);
   const note = IDS.notes.libraryBooksToday;
-  for (const trace of [LAB_7, QUIZ_3, 'CHEM 120', 'Jordan Rivera', `"${note}"`, `:${note}"`]) {
+  for (const trace of [
+    LAB_7,
+    QUIZ_3,
+    ANNOUNCEMENT_TITLE,
+    'Dr. Maya Okafor',
+    'CHEM 120',
+    'Jordan Rivera',
+    `"${note}"`,
+    `:${note}"`,
+  ]) {
     expect(cached).not.toContain(trace);
   }
   expect(cached).toContain(SKETCHBOOK);

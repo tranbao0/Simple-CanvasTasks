@@ -1,0 +1,37 @@
+/**
+ * The welcome page that opens on install. See docs/design.md, decision 5, "First run".
+ */
+import { BROWSER_KIND } from '../../../shared/platform/browserKind';
+import { logFailure } from '../../../shared/platform/log';
+import { settingsItem } from '../data/storage';
+import { PAGE_LAYOUT_CSS, installStyles } from '../../../shared/ui/styles';
+import { WelcomeView } from '../ui/WelcomeView';
+import { actionShortcut, extensionPageHost, mountRuntime } from './hosts';
+import { createSurfaceRuntime, type SurfaceRuntime } from './runtime';
+import { followExtensionPageTheme } from '../../../shared/ui/theme';
+
+/** The welcome page that opens on install in every browser, with the same setup steps as the panel. */
+export function startWelcome(root: HTMLElement): SurfaceRuntime {
+  installStyles(document, PAGE_LAYOUT_CSS);
+  followExtensionPageTheme(settingsItem, [document.documentElement, root], logFailure);
+  const runtime = createSurfaceRuntime(extensionPageHost(), {
+    surface: 'page',
+    scopeCourseId: null,
+  });
+  let shortcut: string | null = null;
+  const draw = mountRuntime(root, runtime, (state) => (
+    <WelcomeView
+      browser={BROWSER_KIND}
+      shortcut={shortcut}
+      state={state}
+      actions={runtime.actions}
+    />
+  ));
+  actionShortcut()
+    .then((value) => {
+      shortcut = value;
+      draw();
+    })
+    .catch((error: unknown) => logFailure('shortcut', error));
+  return runtime;
+}

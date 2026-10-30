@@ -1,4 +1,4 @@
-# Contributing to Weekrow for Canvas
+# Contributing to Tools for Canvas
 
 Thank you for your help.
 This page tells you how to set up the project, which checks to run and how to sign off your work.
@@ -64,7 +64,7 @@ On other systems, install Firefox and geckodriver yourself and set `FIREFOX_BIN`
 
 ## Project rules
 
-- Network calls go only through the Canvas fetch wrapper in `src/lib/canvas`.
+- Network calls go only through the Canvas fetch wrapper in `src/shared/canvas`.
   A lint rule forbids `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource` and `navigator.sendBeacon` everywhere else.
 - Add no analytics, no error reporting and no remote configuration.
 - The URL check fails on any URL in the build that is not in `scripts/url-allowlist.json`.

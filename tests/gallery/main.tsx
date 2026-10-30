@@ -1,26 +1,38 @@
 /**
  * The view gallery. It renders every surface state from mock data at several widths.
  * `?theme=dark` renders the in-page surfaces with a dark host; extension pages follow
- * `prefers-color-scheme`, which the screenshot script emulates.
+ * `prefers-color-scheme`, which the screenshot script emulates. Scenes named `theme-*` force a
+ * theme with `data-theme`, so they look the same in both runs.
  * `?scene=<name>` renders one scene only.
+ *
+ * In-page scenes get Canvas's default brand custom properties, as a Canvas page has. When the
+ * Canvas fonts are in the local test cache (see vite.config.ts), the gallery loads them, so the
+ * text renders in Canvas's Lato as on a Canvas page.
  */
+import { DEFAULT_TOOLS_SETTINGS } from '../../src/shared/settings/tools';
 import { render, type ComponentChildren, type VNode } from 'preact';
 import { useEffect, useLayoutEffect, useRef } from 'preact/hooks';
+import { App } from '../../src/features/weekly-list/ui/App';
+import { SettingsView } from '../../src/features/weekly-list/ui/SettingsView';
+import { APP_CSS, PAGE_LAYOUT_CSS, installStyles } from '../../src/shared/ui/styles';
+import { WelcomeView } from '../../src/features/weekly-list/ui/WelcomeView';
+import type { AppProps, SurfaceKind } from '../../src/features/weekly-list/ui/contract';
 import {
-  App,
-  APP_CSS,
-  CollapsedLine,
-  installStyles,
-  SettingsView,
-  WelcomeView,
-} from '../../src/lib/ui';
-import type { AppProps, SurfaceKind } from '../../src/lib/ui/contract';
-import { attachShadowMount, type ShadowMount } from '../../src/lib/surface/shadowMount';
+  attachShadowMount,
+  type ShadowMount,
+} from '../../src/features/weekly-list/surface/shadowMount';
 import {
+  allDoneView,
+  announcementRows,
+  announcementsProps,
+  checkedButMissing,
   COURSES,
+  currentRings,
   currentWeekGroups,
+  eightCoursesView,
   et,
   hiddenCourseView,
+  laterSpanView,
   limitedFilteredView,
   mkGroup,
   mkItem,
@@ -30,10 +42,14 @@ import {
   nothingDueView,
   ORIGIN,
   OTHER_OFFER,
-  pastWeekView,
+  pastSpanView,
   readyState,
-} from '../../src/lib/ui/testing/mocks';
-import type { Settings } from '../../src/lib/model/types';
+} from '../../src/features/weekly-list/ui/testing/mocks';
+import type { Settings } from '../../src/features/weekly-list/model/types';
+import type { AnnouncementFeed } from '../../src/features/weekly-list/data/announcements';
+
+/** The folder with Canvas's Lato fonts, or an empty string when the cache is missing. */
+declare const __CANVAS_FONTS__: string;
 
 const params = new URLSearchParams(location.search);
 const theme = params.get('theme') === 'dark' ? 'dark' : 'light';
@@ -42,6 +58,25 @@ const actions = noopActions((name, args) => console.info('action', name, ...args
 
 const PANEL_WIDTHS = [170, 240, 360, 480];
 
+/** Actions whose "Show more" loads a message, as the background does. */
+const actionsWithMessages = {
+  ...actions,
+  loadAnnouncementMessage: async () =>
+    '<p>The lab section moves to <strong>Science Hall 214</strong> on Thursday.</p>' +
+    '<p>Read the <a href="/courses/101/pages/lab-safety">lab safety page</a> first.</p>' +
+    '<ul><li>Bring your goggles</li><li>Bring your notebook</li></ul>' +
+    '<table><tr><th>Group</th><th>Room</th><th>Time</th><th>Instructor</th></tr>' +
+    '<tr><td>A</td><td>214</td><td>9:00 am</td><td>Dr. Okafor</td></tr></table>',
+};
+
+/** A feed reply with the given rows, for the states of the tab. */
+function feedWith(patch: Partial<Extract<AnnouncementFeed, { status: 'ready' }>>) {
+  const base = announcementsProps();
+  return announcementsProps({
+    feed: { ...(base.feed as Extract<AnnouncementFeed, { status: 'ready' }>), ...patch },
+  });
+}
+
 interface Scene {
   name: string;
   widths: number[];
@@ -49,6 +84,8 @@ interface Scene {
   height?: number;
   /** In-page scenes render inside a shadow root with a themed host. */
   shadow?: boolean;
+  /** Forces `data-theme` on the frame, whatever the run's theme. */
+  forceTheme?: 'light' | 'dark';
   render(): VNode;
   /** Runs after the first render, such as clicks that open groups. */
   setup?(root: ParentNode): Promise<void>;
@@ -68,12 +105,19 @@ async function clickAll(root: ParentNode, selector: string): Promise<void> {
 function app(
   surface: SurfaceKind,
   state: AppProps['state'],
-  options: Pick<AppProps, 'collapsedToPanel' | 'browser' | 'shortcut'> = {},
+  options: Pick<AppProps, 'settings' | 'announcements'> = {},
 ) {
-  return () => <App surface={surface} state={state} actions={actions} {...options} />;
+  // The span control is on once the settings have loaded, with the span that the view shows.
+  const loaded: AppProps['settings'] =
+    state.kind === 'ready'
+      ? { value: { ...settings, span: state.view.span }, courses: [] }
+      : undefined;
+  return () => (
+    <App surface={surface} state={state} actions={actions} settings={loaded} {...options} />
+  );
 }
 
-/** A busy week for the in-page list: groups longer than its row limit. */
+/** A busy week for the in-page list: groups with many rows. */
 function busyWeekView() {
   const base = currentWeekGroups();
   const pastDue = base.find((group) => group.kind === 'past_due');
@@ -114,11 +158,83 @@ function busyWeekView() {
 }
 
 const settings: Settings = {
-  weekStart: 'auto',
+  span: { kind: 'week', days: 7 },
   hiddenCourseIds: [COURSES.psyc.id],
   showRings: true,
-  showOnCanvasPages: true,
+  minimized: false,
+  theme: 'auto',
 };
+
+const settingsData: AppProps['settings'] = {
+  value: settings,
+  courses: Object.values(COURSES).map(({ id, name }) => ({ id, name })),
+};
+
+/** Opens the settings in place with the gear. */
+async function openGear(root: ParentNode): Promise<void> {
+  root.querySelector<HTMLElement>('[data-opener="gear"]')?.click();
+  await tick();
+}
+
+/** A span with one checked item that Canvas still marks missing, in Done beside late work. */
+function checkedMissingView() {
+  return mkView({
+    groups: [
+      mkGroup({
+        kind: 'past_due',
+        items: [
+          mkItem({
+            title: 'Lab 5 report',
+            course: 'bio',
+            due: et('2026-10-23', '17:00'),
+            chip: { kind: 'missing' },
+            availability: { kind: 'closed' },
+            canSkip: true,
+          }),
+        ],
+      }),
+      mkGroup({
+        kind: 'today',
+        date: '2026-10-27',
+        items: [
+          mkItem({ title: 'Quiz 7', course: 'math', kind: 'quiz', due: et('2026-10-27', '23:59') }),
+        ],
+      }),
+      mkGroup({ kind: 'done', warningCount: 1, items: [checkedButMissing()] }),
+    ],
+    // The checked worksheet of Chemistry counts as done, so Chemistry has nothing late.
+    rings: mkView()
+      .rings.filter((r) => r.courseId === COURSES.chem.id || r.courseId === COURSES.bio.id)
+      .map((r) => (r.courseId === COURSES.chem.id ? { ...r, pastDue: 0 } : r)),
+    hiddenCourseCount: 0,
+  });
+}
+
+/**
+ * A week in the middle of its first load: Today and Tomorrow arrived, the later days wait, and
+ * Past due is still on its way. `days` is how many later days wait, and `arrived: false` shows
+ * the frame before any day arrived.
+ */
+function loadingDaysView(options: { days?: number; arrived?: boolean } = {}) {
+  const { days = 5, arrived = true } = options;
+  const real = currentWeekGroups().filter((g) => g.kind === 'today' || g.kind === 'tomorrow');
+  const later = ['2026-10-29', '2026-10-30', '2026-10-31', '2026-11-01', '2026-11-02'];
+  const waiting = later.slice(0, days).map((date) => mkGroup({ kind: 'day', date, loading: true }));
+  const first = arrived
+    ? real
+    : [
+        mkGroup({ kind: 'today', date: '2026-10-27', loading: true }),
+        mkGroup({ kind: 'tomorrow', date: '2026-10-28', loading: true }),
+      ];
+  return mkView({
+    groups: [mkGroup({ kind: 'past_due', loading: true }), ...first, ...waiting],
+    loading: true,
+    nothingDue: false,
+    rings: currentRings().map((r) =>
+      arrived ? { ...r, total: Math.ceil(r.total / 2) } : { ...r, done: 0, total: 0, pastDue: 0 },
+    ),
+  });
+}
 
 const scenes: Scene[] = [
   { name: 'ready', widths: PANEL_WIDTHS, render: app('panel', readyState()) },
@@ -143,7 +259,7 @@ const scenes: Scene[] = [
       readyState({
         stale: { since: '2026-10-27T19:05:00Z', offline: true },
         refreshing: true,
-        offer: { origin: 'https://canvas.state.edu', mode: 'switch' },
+        offer: { origin: 'https://canvas.state.edu' },
         undo: { kind: 'done', count: 1 },
         seenNotes: { firstDone: false, firstSkip: false },
       }),
@@ -163,12 +279,192 @@ const scenes: Scene[] = [
   {
     name: 'ready-past-week',
     widths: PANEL_WIDTHS,
-    render: app('panel', readyState({ view: pastWeekView() })),
+    render: app('panel', readyState({ view: pastSpanView() })),
+  },
+  {
+    name: 'ready-later-span',
+    widths: PANEL_WIDTHS,
+    render: app('panel', readyState({ view: laterSpanView() })),
+  },
+  {
+    name: 'inpage-later-span',
+    widths: [240],
+    shadow: true,
+    render: app('inpage', readyState({ view: laterSpanView() })),
+  },
+  {
+    name: 'announcements',
+    widths: [170, 200, 240, 360, 480],
+    render: app('panel', readyState(), { announcements: announcementsProps() }),
+  },
+  {
+    name: 'announcements-many-unread',
+    widths: [170, 240],
+    render: app('panel', readyState(), { announcements: feedWith({ unread: 150 }) }),
+  },
+  {
+    name: 'announcements-open',
+    widths: PANEL_WIDTHS,
+    render: () => (
+      <App
+        surface="panel"
+        state={readyState()}
+        actions={actionsWithMessages}
+        announcements={announcementsProps()}
+      />
+    ),
+    async setup(root) {
+      root.querySelector<HTMLElement>('.wr-ann-title')?.click();
+      await tick();
+      await tick();
+    },
+  },
+  {
+    name: 'announcements-show-read',
+    widths: [240, 360],
+    render: app('panel', readyState(), { announcements: announcementsProps({ showRead: true }) }),
+  },
+  {
+    name: 'announcements-undo',
+    widths: [240, 360],
+    render: app('panel', readyState({ undo: { kind: 'announcement_read', count: 1 } }), {
+      announcements: announcementsProps(),
+    }),
+  },
+  {
+    name: 'announcements-loading',
+    widths: [240, 360],
+    render: app('panel', readyState(), {
+      announcements: feedWith({ rows: [], unread: 0, loading: true }),
+    }),
+  },
+  {
+    name: 'announcements-empty',
+    widths: [240, 360],
+    render: app('panel', readyState(), {
+      announcements: feedWith({ rows: [], unread: 0 }),
+    }),
+  },
+  {
+    name: 'announcements-empty-unread',
+    widths: [240, 360],
+    render: app('panel', readyState(), {
+      announcements: feedWith({ rows: announcementRows().filter((r) => r.read), unread: 0 }),
+    }),
+  },
+  {
+    name: 'announcements-failed',
+    widths: [240, 360],
+    render: app('panel', readyState(), {
+      announcements: feedWith({ rows: [], unread: 0, failed: true }),
+    }),
+  },
+  {
+    name: 'inpage-tabs',
+    widths: [240],
+    shadow: true,
+    render: app('inpage', readyState({ view: busyWeekView() }), {
+      announcements: announcementsProps({ tab: 'tasks' }),
+    }),
+  },
+  {
+    name: 'inpage-announcements',
+    widths: [240],
+    shadow: true,
+    render: app('inpage', readyState({ view: busyWeekView() }), {
+      announcements: announcementsProps(),
+    }),
+  },
+  {
+    name: 'inpage-announcements-open',
+    widths: [240],
+    shadow: true,
+    render: () => (
+      <App
+        surface="inpage"
+        state={readyState({ view: busyWeekView() })}
+        actions={actionsWithMessages}
+        announcements={announcementsProps()}
+      />
+    ),
+    async setup(root) {
+      root.querySelector<HTMLElement>('.wr-ann-title')?.click();
+      await tick();
+      await tick();
+    },
+  },
+  {
+    name: 'ready-span-day',
+    widths: PANEL_WIDTHS,
+    render: app(
+      'panel',
+      readyState({
+        view: mkView({
+          span: { kind: 'day', days: 7 },
+          spanStart: '2026-10-27',
+          spanEnd: '2026-10-27',
+        }),
+      }),
+    ),
+  },
+  {
+    name: 'ready-span-month',
+    widths: PANEL_WIDTHS,
+    render: app(
+      'panel',
+      readyState({
+        view: mkView({
+          span: { kind: 'month', days: 7 },
+          spanStart: '2026-10-27',
+          spanEnd: '2026-11-26',
+        }),
+      }),
+    ),
+  },
+  {
+    name: 'ready-span-custom',
+    widths: PANEL_WIDTHS,
+    render: app(
+      'panel',
+      readyState({
+        view: mkView({
+          span: { kind: 'custom', days: 10 },
+          spanStart: '2026-10-27',
+          spanEnd: '2026-11-05',
+        }),
+      }),
+    ),
+  },
+  {
+    name: 'inpage-span-fortnight',
+    widths: [240],
+    shadow: true,
+    render: app(
+      'inpage',
+      readyState({
+        view: {
+          ...busyWeekView(),
+          span: { kind: 'fortnight', days: 7 },
+          spanStart: '2026-10-27',
+          spanEnd: '2026-11-09',
+        },
+      }),
+    ),
   },
   {
     name: 'ready-nothing-due',
     widths: PANEL_WIDTHS,
     render: app('panel', readyState({ view: nothingDueView() })),
+  },
+  {
+    name: 'ready-eight-courses',
+    widths: [240, 360],
+    render: app('panel', readyState({ view: eightCoursesView() })),
+  },
+  {
+    name: 'ready-all-done',
+    widths: [240, 360],
+    render: app('panel', readyState({ view: allDoneView() })),
   },
   {
     name: 'ready-limited-filter',
@@ -270,40 +566,12 @@ const scenes: Scene[] = [
     render: app('panel', entry.state),
   })),
   {
-    name: 'state-address-error',
-    widths: [170, 360],
-    render: app('panel', { kind: 'not_set_up', offer: null, savedOrigin: null }),
-    async setup(root) {
-      root.querySelector<HTMLElement>('button[type="submit"]')?.click();
-      await tick();
-    },
-  },
-  {
-    name: 'state-firefox-first-run',
-    widths: PANEL_WIDTHS,
-    render: app(
-      'panel',
-      { kind: 'not_set_up', offer: null, savedOrigin: null },
-      { browser: 'firefox', shortcut: 'Ctrl+Alt+W' },
-    ),
-  },
-  {
-    name: 'state-firefox-first-run-offer',
-    widths: [240, 360],
-    render: app(
-      'panel',
-      { kind: 'not_set_up', offer: { origin: ORIGIN, mode: 'use' }, savedOrigin: null },
-      { browser: 'firefox', shortcut: null },
-    ),
-  },
-  {
     name: 'state-cant-load-offer',
     widths: [240, 360],
     render: app('panel', {
       kind: 'cant_load',
       origin: ORIGIN,
       offline: false,
-      savedOrigin: null,
       offer: OTHER_OFFER,
     }),
   },
@@ -348,19 +616,35 @@ const scenes: Scene[] = [
   },
   {
     name: 'inpage-busy',
-    widths: [240],
+    widths: [170, 240],
     shadow: true,
     render: app('inpage', readyState({ view: busyWeekView() })),
   },
   {
-    name: 'inpage-busy-expanded',
-    widths: [240],
+    name: 'inpage-minimized',
+    widths: [240, 340],
     shadow: true,
-    render: app('inpage', readyState({ view: busyWeekView() })),
-    async setup(root) {
-      root.querySelector<HTMLElement>('.wr-more')?.click();
-      await tick();
-    },
+    render: app('inpage', readyState({ view: busyWeekView() }), {
+      settings: { value: { ...settings, minimized: true }, courses: [] },
+    }),
+  },
+  {
+    name: 'inpage-eight-courses',
+    widths: [170, 240],
+    shadow: true,
+    render: app('inpage', readyState({ view: eightCoursesView() })),
+  },
+  {
+    name: 'inpage-nothing-due',
+    widths: [170, 240],
+    shadow: true,
+    render: app('inpage', readyState({ view: nothingDueView() })),
+  },
+  {
+    name: 'inpage-all-done',
+    widths: [170, 240],
+    shadow: true,
+    render: app('inpage', readyState({ view: allDoneView() })),
   },
   {
     name: 'inpage-course-home',
@@ -382,12 +666,100 @@ const scenes: Scene[] = [
     ),
   },
   {
+    // The days near today are in, the later days show placeholders, and Past due is one line.
+    name: 'loading-days',
+    widths: [240, 360],
+    render: app('panel', readyState({ refreshing: true, view: loadingDaysView() })),
+  },
+  {
+    // Right after the frame: nothing has arrived yet.
+    name: 'loading-all-days',
+    widths: [240, 360],
+    render: app(
+      'panel',
+      readyState({ refreshing: true, view: loadingDaysView({ arrived: false }) }),
+    ),
+  },
+  {
+    // Past due is the last to arrive.
+    name: 'loading-past-due',
+    widths: [240, 360],
+    render: app('panel', readyState({ refreshing: true, view: loadingDaysView({ days: 0 }) })),
+  },
+  {
+    name: 'inpage-loading-days',
+    widths: [240],
+    shadow: true,
+    render: app('inpage', readyState({ refreshing: true, view: loadingDaysView() })),
+  },
+  {
     name: 'inpage-loading',
     widths: [240],
     shadow: true,
     render: app('inpage', { kind: 'loading' }),
   },
-  { name: 'inpage-collapsed', widths: [240], shadow: true, render: () => <CollapsedLine /> },
+  {
+    name: 'inpage-checked-missing',
+    widths: [240],
+    shadow: true,
+    render: app('inpage', readyState({ view: checkedMissingView() })),
+  },
+  {
+    name: 'ready-checked-missing',
+    widths: [170, 360],
+    render: app('panel', readyState({ view: checkedMissingView() })),
+  },
+  {
+    name: 'settings-in-place',
+    widths: [240, 360],
+    render: app('panel', readyState(), { settings: settingsData }),
+    setup: openGear,
+  },
+  {
+    name: 'settings-in-place-narrow',
+    widths: [170],
+    render: app('panel', readyState(), { settings: settingsData }),
+    setup: openGear,
+  },
+  {
+    name: 'settings-in-place-loading',
+    widths: [240],
+    render: app('panel', readyState()),
+    setup: openGear,
+  },
+  {
+    name: 'inpage-settings',
+    widths: [240],
+    shadow: true,
+    render: app('inpage', readyState(), { settings: settingsData }),
+    setup: openGear,
+  },
+  {
+    name: 'theme-forced-dark',
+    widths: [240, 360],
+    forceTheme: 'dark',
+    render: app('panel', readyState()),
+  },
+  {
+    name: 'theme-forced-light',
+    widths: [240, 360],
+    forceTheme: 'light',
+    render: app('panel', readyState()),
+  },
+  {
+    name: 'theme-forced-dark-inpage',
+    widths: [240],
+    shadow: true,
+    forceTheme: 'dark',
+    render: app('inpage', readyState({ view: busyWeekView() })),
+  },
+  {
+    name: 'theme-forced-light-inpage',
+    widths: [240],
+    shadow: true,
+    forceTheme: 'light',
+    render: app('inpage', readyState({ view: busyWeekView() })),
+  },
   {
     name: 'inpage-hidden-course',
     widths: [240],
@@ -406,10 +778,11 @@ const scenes: Scene[] = [
     render: () => (
       <SettingsView
         settings={settings}
+        tools={DEFAULT_TOOLS_SETTINGS}
+        onToolsChange={(next) => console.info('tools', next)}
         courses={Object.values(COURSES).map(({ id, name }) => ({ id, name }))}
         origin={ORIGIN}
         onChange={(next) => console.info('settings', next)}
-        onChangeAddress={() => actions.changeAddress()}
       />
     ),
   },
@@ -420,7 +793,19 @@ const scenes: Scene[] = [
       <WelcomeView
         browser="chrome"
         shortcut="Alt+Shift+W"
-        state={{ kind: 'not_set_up', offer: null, savedOrigin: null }}
+        state={{ kind: 'not_set_up', offer: null }}
+        actions={actions}
+      />
+    ),
+  },
+  {
+    name: 'welcome-offer',
+    widths: [360, 720],
+    render: () => (
+      <WelcomeView
+        browser="chrome"
+        shortcut="Alt+Shift+W"
+        state={{ kind: 'not_set_up', offer: { origin: 'https://canvas.school.edu' } }}
         actions={actions}
       />
     ),
@@ -435,13 +820,17 @@ const scenes: Scene[] = [
 ];
 
 /** Renders `children` into the same shadow mount that the in-page content script uses. */
-function ShadowFrame(props: { children: ComponentChildren; width: number }) {
+function ShadowFrame(props: {
+  children: ComponentChildren;
+  width: number;
+  theme: 'light' | 'dark';
+}) {
   const parentRef = useRef<HTMLDivElement>(null);
   const mountRef = useRef<ShadowMount | null>(null);
   useLayoutEffect(() => {
     const parent = parentRef.current;
     if (!parent) return;
-    mountRef.current ??= attachShadowMount(parent, { css: APP_CSS, theme });
+    mountRef.current ??= attachShadowMount(parent, { css: APP_CSS, theme: props.theme });
     render(<>{props.children}</>, mountRef.current.root);
   });
   return <div ref={parentRef} class="frame-host" style={{ width: `${props.width}px` }} />;
@@ -470,14 +859,27 @@ function SceneView({ scene }: { scene: Scene }) {
           <div key={width} class="frame-wrap">
             <div class="frame-label">{width} px</div>
             <div
-              class={scene.height ? 'frame is-fixed' : 'frame'}
+              class={[
+                'frame',
+                scene.height ? 'is-fixed' : '',
+                scene.shadow ? 'is-canvas' : '',
+                scene.shadow && (scene.forceTheme !== undefined || theme === 'light')
+                  ? 'is-light-page'
+                  : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              data-theme={scene.shadow ? undefined : scene.forceTheme}
               style={{
-                width: `${width}px`,
+                // A Canvas frame is the right column: the list's width plus 24 px at each side.
+                width: `${scene.shadow ? width + 48 : width}px`,
                 height: scene.height ? `${scene.height}px` : undefined,
               }}
             >
               {scene.shadow ? (
-                <ShadowFrame width={width}>{scene.render()}</ShadowFrame>
+                <ShadowFrame width={width} theme={scene.forceTheme ?? theme}>
+                  {scene.render()}
+                </ShadowFrame>
               ) : (
                 scene.render()
               )}
@@ -495,20 +897,37 @@ const GALLERY_CSS = `
   .scene-name { margin: 0 0 12px; font-size: 14px; font-weight: 600; }
   .frames { display: flex; align-items: flex-start; gap: 24px; }
   .frame-label { margin-bottom: 6px; font-size: 11px; opacity: .7; }
-  .frame { box-shadow: 0 0 0 1px light-dark(#c8ccd3, #2a2d33); background: light-dark(#fff, #17181b); }
+  .frame { box-sizing: border-box; box-shadow: 0 0 0 1px light-dark(#c8ccd3, #2a2d33); background: light-dark(#fff, #17181b); }
   .frame.is-fixed { overflow: auto; }
   .frame > .wr[data-surface='panel'] { min-height: 0; }
   .frame:not(.is-fixed) .wr-header, .frame:not(.is-fixed) .wr-dock { position: relative; }
   .frame.is-fixed > .wr[data-surface='panel'] { min-height: 100%; }
-  .frame:has(weekrow-list[data-theme='dark']) { background: #1b1c1f; }
-  .frame:has(weekrow-list[data-theme='light']) { background: #fff; }
+  .frame[data-theme='dark'] { background: #1b2330; color-scheme: dark; }
+  .frame[data-theme='light'] { background: #fff; color-scheme: light; }
+  .frame.is-canvas { padding: 24px; background: #181a1b; --ic-brand-primary: #2B7ABC; --ic-brand-font-color-dark: #273540; --ic-link-color: #0E68B3; --ic-link-color-darkened-10: #0D5EA2; --ic-brand-button--primary-bgd: var(--ic-brand-primary); --ic-brand-button--primary-text: #fff; }
+  .frame.is-canvas.is-light-page { background: #fff; }
 `;
+
+/** Canvas's Lato, from the local test cache, as a Canvas page declares it. */
+function canvasFontsCss(dir: string): string {
+  const faces: [string, string, string][] = [
+    ['400', 'normal', 'Lato-Regular-bd03a2cc27.woff2'],
+    ['400', 'italic', 'Lato-Italic-4eb103b4d1.woff2'],
+    ['700', 'normal', 'Lato-Bold-cccb897485.woff2'],
+  ];
+  return faces
+    .map(
+      ([weight, style, file]) =>
+        `@font-face{font-family:"Lato Extended";font-weight:${weight};font-style:${style};src:url("/@fs${dir}/${file}") format("woff2")}`,
+    )
+    .join('');
+}
 
 function Gallery() {
   const shown = only ? scenes.filter((scene) => scene.name === only) : scenes;
   return (
     <>
-      <style>{GALLERY_CSS}</style>
+      <style>{GALLERY_CSS + (__CANVAS_FONTS__ ? canvasFontsCss(__CANVAS_FONTS__) : '')}</style>
       {shown.map((scene) => (
         <SceneView key={scene.name} scene={scene} />
       ))}
@@ -516,6 +935,6 @@ function Gallery() {
   );
 }
 
-installStyles(document);
+installStyles(document, PAGE_LAYOUT_CSS);
 const root = document.getElementById('gallery');
 if (root) render(<Gallery />, root);

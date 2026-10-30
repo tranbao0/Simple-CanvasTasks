@@ -1,6 +1,7 @@
-# Weekrow for Canvas
+# Tools for Canvas
 
-Weekrow for Canvas shows your Canvas coursework for the week as a simple to-do list, with a progress ring for each course.
+Tools for Canvas is a set of fixes for Canvas LMS students.
+The first fix is a weekly to-do list that shows your Canvas coursework for the week, with a progress ring for each course.
 It is a browser extension for Chrome, Edge and Firefox.
 It has no account, no server of its own and no telemetry.
 
@@ -22,16 +23,16 @@ It has no account, no server of its own and no telemetry.
 
 ## Done marks change Canvas
 
-Weekrow keeps no copy of your work.
+Tools for Canvas keeps no copy of your work.
 Done marks, skip marks and your own tasks live in your Canvas account, as Canvas planner data.
 So the Canvas To Do list and the Canvas mobile apps show the same done marks.
 
 A done mark can have a side effect in Canvas.
 On a module item, Canvas can count a done mark as the module's "Mark as done" requirement.
-The first time you check an item off, Weekrow shows this note: "Done marks sync to Canvas and its apps. On a module item, this can count as 'Mark as done'."
+The first time you check an item off, Tools for Canvas shows this note: "Done marks sync to Canvas and its apps. On a module item, this can count as 'Mark as done'."
 
 Skip uses the Canvas "dismissed" flag.
-The first time you skip an item, Weekrow shows this note: "Skipping also hides this item in Canvas's list of missing work."
+The first time you skip an item, Tools for Canvas shows this note: "Skipping also hides this item in Canvas's list of missing work."
 
 ## Browsers
 
@@ -39,19 +40,27 @@ The first time you skip an item, Weekrow shows this note: "Skipping also hides t
 - Microsoft Edge 144 or later.
 - Firefox 140 or later.
 
-Weekrow runs on desktop browsers only.
+Tools for Canvas runs on desktop browsers only.
 Safari and mobile browsers are not supported.
 
 ## Site access
 
-Weekrow asks for access to `https://*.instructure.com` when you install it.
-If your school uses its own Canvas address, such as `canvas.example.edu`, Weekrow asks for access to that one address when you click "Allow access".
-It reads and writes data only on the Canvas address that you save.
+Tools for Canvas asks for access to all websites (`https://*/*`) when you install it.
+Canvas runs on many school addresses, such as `canvas.example.edu`, so the extension cannot know your address in advance.
+With this access, it works right after you install it, with no setup step.
+A tiny script runs on each web page and checks only for the Canvas page markers.
+It keeps no page text, announces nothing to the page and sends nothing anywhere.
+On a Canvas page, it asks the extension to show your list.
+The first Canvas page that you open on `instructure.com` sets your Canvas address.
+On a Canvas with its own address, the welcome page and the side panel ask "Use canvas.example.edu as your Canvas?", and one click on "Use it" sets the address.
+A page can copy the Canvas markers, so the extension asks once, in its own pages, before it trusts an address outside `instructure.com`.
+The extension reads and writes data only on that Canvas address.
+On another Canvas, the side panel offers "Switch to this Canvas?".
 
 ## Privacy
 
-Weekrow reads your Canvas data in your browser and shows it to you.
-It writes only done marks, skip marks and your own tasks, and only to your own Canvas.
+Tools for Canvas reads your Canvas data in your browser and shows it to you.
+It writes only done marks, skip marks, your own tasks and announcement read marks, and only to your own Canvas.
 On your device, it stores only its settings, your Canvas address, a change time stamp and which one-time notes you have seen.
 Nothing goes anywhere else: there are no analytics, no error reports and no remote configuration.
 A lint rule and a CI check enforce this in the code.
@@ -62,8 +71,8 @@ Read the full [privacy policy](docs/privacy.md).
 You need Node.js 26 (see `.nvmrc`) and npm.
 
 ```sh
-git clone https://github.com/tranbao0/Simple-CanvasTasks.git
-cd Simple-CanvasTasks
+git clone https://github.com/tranbao0/tools-for-canvas.git
+cd tools-for-canvas
 npm ci
 npm run build
 ```
@@ -85,6 +94,25 @@ Other commands:
 | `npm run zip`           | Makes the store packages and the Firefox source zip in `.output` |
 | `npm run build-for-amo` | Builds the Firefox package as the Firefox Add-ons reviewers do   |
 
+## Project layout
+
+Tools for Canvas is a set of fixes, and the weekly list is the first one.
+Each fix lives in its own folder, and code that any fix can use is shared.
+
+| Folder                       | What it holds                                                                     |
+| ---------------------------- | --------------------------------------------------------------------------------- |
+| `src/entrypoints`            | The entry points that WXT builds: background, detector, in-page script and pages  |
+| `src/shared/canvas`          | The Canvas client, its types, the request limiter and paging                      |
+| `src/shared/platform`        | Storage, access, install and welcome, injection, messages and browser helpers     |
+| `src/shared/ui`              | Parts with the Canvas look: icons, buttons, the theme, styles and the page layout |
+| `src/features/weekly-list`   | The weekly list, in the subfolders `model`, `data`, `inpage`, `surface` and `ui`  |
+| `tests/e2e`, `tests/firefox` | End-to-end tests in Chromium and the Firefox smoke test                           |
+| `tests/fixtures`             | The fake Canvas data, with the tests that check it                                |
+| `tests/gallery`              | The screenshot gallery of the views                                               |
+
+A unit test sits next to its code as `name.test.ts` or `name.test.tsx`.
+A `testing` folder holds the helpers that several tests of one folder share.
+
 ## Test and check
 
 | Command                  | What it does                                                                          |
@@ -95,7 +123,7 @@ Other commands:
 | `npm test`               | Unit tests with Vitest                                                                |
 | `npm run test:scripts`   | Tests for the build checks                                                            |
 | `npm run check`          | Builds all browsers, then runs the four build checks below                            |
-| `npm run check:size`     | Fails if an entry point is over 30 KB after gzip                                      |
+| `npm run check:size`     | Fails if an entry point is over its gzip limit (40 KB, or 2 KB for the detector)      |
 | `npm run check:urls`     | Fails if the build contains a URL that is not in `scripts/url-allowlist.json`         |
 | `npm run check:manifest` | Checks the permissions and browser settings in each built manifest                    |
 | `npm run check:fetch`    | Fails if a built bundle other than the background script calls `fetch`                |
@@ -115,10 +143,10 @@ Every commit needs a DCO sign-off.
 
 ## License
 
-Weekrow for Canvas is free software under the GNU General Public License, version 3 only (GPL-3.0-only).
+Tools for Canvas is free software under the GNU General Public License, version 3 only (GPL-3.0-only).
 See [LICENSE](LICENSE).
 
-The name "Weekrow" is not licensed under the GPL.
+The name "Tools for Canvas" is not licensed under the GPL.
 As section 7(e) of the GPL allows, this project grants no rights under trademark law to the name.
 If you distribute a modified version, give it a different name.
 

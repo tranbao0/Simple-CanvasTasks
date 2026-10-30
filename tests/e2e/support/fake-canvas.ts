@@ -2,15 +2,13 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { BrowserContext, Request, Route } from '@playwright/test';
 import { ROOT } from '../../../scripts/lib/ensure-build.mjs';
+import { renderFixturePageByName } from '../../fixtures/pages';
 
 /** The origin of the fake Canvas site. */
 export const FAKE_CANVAS_ORIGIN = 'https://school.instructure.com';
 
 /** JSON fixtures with the real Canvas response shape, read by name: `<name>.json`. */
 export const FIXTURES_DIR = path.join(ROOT, 'tests', 'fixtures');
-
-/** Saved copies of Canvas pages, read by name: `<name>.html`. */
-export const PAGES_DIR = path.join(FIXTURES_DIR, 'pages');
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD';
 
@@ -31,7 +29,7 @@ interface RouteMatch {
   headers?: Readonly<Record<string, string>>;
 }
 
-/** Serves `tests/fixtures/pages/<page>.html`. */
+/** Serves the fake page built from `tests/fixtures/pages/<page>.html`. */
 export interface PageRoute extends RouteMatch {
   page: string;
   json?: never;
@@ -89,6 +87,8 @@ export interface RecordedRequest {
   headers: Readonly<Record<string, string>>;
   /** When the request reached the fake, in epoch milliseconds of the test runner. */
   at: number;
+  /** When the fake sent its answer, in epoch milliseconds of the test runner, or `null` before. */
+  answeredAt: number | null;
 }
 
 export interface FakeCanvas {
@@ -104,6 +104,16 @@ export interface FakeCanvas {
 export interface FakeCanvasOptions {
   /** Defaults to {@link FAKE_CANVAS_ORIGIN}. */
   origin?: string;
+  /**
+   * How long every answer of the fake origin waits, as the round trip to a real Canvas does.
+   * Requests wait side by side, so parallel requests do not add up. Defaults to 0.
+   */
+  latencyMs?: number;
+  /**
+   * Leaves requests to other origins to the fake that was served before, instead of aborting them.
+   * A test serves a second Canvas next to the first one this way.
+   */
+  alongside?: boolean;
 }
 
 interface Reply {
@@ -135,9 +145,9 @@ export function readJsonFixture(name: string): string {
   return readFileSync(fixturePath(FIXTURES_DIR, name, '.json'), 'utf8');
 }
 
-/** Reads `tests/fixtures/pages/<name>.html` as text. */
+/** Builds the full HTML of the fake page in `tests/fixtures/pages/<name>.html`. */
 export function readPageFixture(name: string): string {
-  return readFileSync(fixturePath(PAGES_DIR, name, '.html'), 'utf8');
+  return renderFixturePageByName(name);
 }
 
 function lowerCaseKeys(headers: Readonly<Record<string, string>> = {}): Record<string, string> {
@@ -198,6 +208,7 @@ function record(request: Request, url: URL): RecordedRequest {
     postData: request.postData(),
     headers: request.headers(),
     at: Date.now(),
+    answeredAt: null,
   };
 }
 
@@ -214,7 +225,8 @@ function isHttp(url: URL): boolean {
  *
  * The first route that matches a request answers it.
  * Fixture files are read now, so a missing fixture fails the test at once.
- * Requests to other http or https origins are aborted and recorded in `blocked`.
+ * Requests to other http or https origins are aborted and recorded in `blocked`, unless the
+ * fake is served `alongside` an earlier one.
  */
 export async function serveFakeCanvas(
   context: BrowserContext,
@@ -222,6 +234,7 @@ export async function serveFakeCanvas(
   options: FakeCanvasOptions = {},
 ): Promise<FakeCanvas> {
   const origin = new URL(options.origin ?? FAKE_CANVAS_ORIGIN).origin;
+  const latencyMs = options.latencyMs ?? 0;
   const replies = new Map<FakeCanvasRoute, Reply>();
   for (const route of routes) if (!isHandlerRoute(route)) replies.set(route, replyFor(route));
   const requests: RecordedRequest[] = [];
@@ -232,6 +245,10 @@ export async function serveFakeCanvas(
     const request = route.request();
     const url = new URL(request.url());
     if (url.origin !== origin) {
+      if (options.alongside === true) {
+        await route.fallback();
+        return;
+      }
       blocked.push(record(request, url));
       await route.abort('blockedbyclient');
       return;
@@ -242,6 +259,7 @@ export async function serveFakeCanvas(
     }
     const recorded = record(request, url);
     requests.push(recorded);
+    if (latencyMs > 0) await new Promise((resolve) => setTimeout(resolve, latencyMs));
     const match = routes.find((candidate) => matches(candidate, request.method(), url));
     const reply =
       match === undefined
@@ -249,13 +267,14 @@ export async function serveFakeCanvas(
         : isHandlerRoute(match)
           ? toReply(await match.respond(recorded))
           : replies.get(match);
+    recorded.answeredAt = Date.now();
     if (reply === undefined) {
       unmatched.push(recorded);
       await route.fulfill({ status: 404, contentType: JSON_TYPE, body: NOT_FOUND_BODY });
       return;
     }
-    if (match !== undefined && isHandlerRoute(match)) {
-      // The test may end, and close the browser, while a held answer waits.
+    if (latencyMs > 0 || (match !== undefined && isHandlerRoute(match))) {
+      // The test may end, and close the browser, while a held or delayed answer waits.
       await route.fulfill(reply).catch(() => undefined);
       return;
     }

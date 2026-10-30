@@ -1,526 +1,3 @@
-<!DOCTYPE html>
-<html dir="ltr" lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#394B58">
-  <meta name="robots" content="noindex,nofollow" />
-  <title>Dashboard</title>
-  <link rel="icon" href="data:,">
-  <style>
-/* Canvas layout at desktop widths, after app/stylesheets/base/_ic_app_layout.scss,
-   _layout.scss, _right-side.scss and _variables.scss ($ic-sp: 12px, right side 288px,
-   course menu 192px, global nav 84px, breakpoints 992px and 1140px). */
-html { -webkit-text-size-adjust: 100%; }
-body {
-  margin: 0;
-  font-family: "Lato Extended", Lato, "Helvetica Neue", Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 1.5;
-  color: #273540;
-  background: #fff;
-}
-a { color: #2b7abc; text-decoration: none; }
-a:hover { text-decoration: underline; }
-h1, h2, h3, h4 { margin: 0; font-weight: 400; line-height: 1.25; }
-p { margin: 0 0 6px; }
-ul { margin: 0; padding: 0; }
-button { font: inherit; }
-.screenreader-only {
-  position: absolute !important;
-  width: 1px; height: 1px; margin: -1px; padding: 0;
-  overflow: hidden; clip: rect(0 0 0 0); border: 0;
-}
-.ic-app { box-sizing: border-box; min-height: 100vh; }
-
-/* Global navigation */
-#mobile-header { display: none; }
-.ic-app-header {
-  position: fixed; top: 0; bottom: 0; left: 0; z-index: 100;
-  width: 84px; background: #394b58; color: #fff;
-  display: flex; flex-direction: column;
-}
-#skip_navigation_link { position: absolute; left: -10000px; }
-.ic-app-header__logomark-container {
-  height: 85px; display: flex; align-items: center; justify-content: center;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.25);
-}
-.ic-app-header__logomark {
-  width: 46px; height: 46px; border-radius: 50%;
-  background: radial-gradient(circle, #fff 0 22%, #e72429 23% 100%);
-}
-.ic-app-header__menu-list { list-style: none; }
-.ic-app-header__menu-list-link {
-  display: flex; flex-direction: column; align-items: center;
-  padding: 10px 0 9px; color: #fff; font-size: 12px; line-height: 1.2; text-align: center;
-}
-.ic-app-header__menu-list-link:hover { text-decoration: none; background: rgba(0, 0, 0, 0.2); }
-.menu-item-icon-container {
-  width: 22px; height: 22px; margin-bottom: 5px;
-  border: 2px solid currentColor; border-radius: 6px;
-}
-.ic-avatar { border-radius: 50%; background: #c7cdd1; border-color: #fff; }
-.ic-app-header__menu-list-item--active { background: #fff; }
-.ic-app-header__menu-list-item--active .ic-app-header__menu-list-link { color: #394b58; }
-
-/* Columns */
-.ic-Layout-wrapper { box-sizing: border-box; min-height: 100vh; display: flex; flex-direction: column; }
-body:not(.full-width) .ic-Layout-wrapper { max-width: 1366px; }
-.ic-app-nav-toggle-and-crumbs {
-  display: flex; align-items: center; box-sizing: border-box;
-  min-height: 72px; margin: 0 24px; border-bottom: 1px solid #c7cdd1;
-}
-.ic-app-course-nav-toggle {
-  width: 36px; height: 36px; margin-right: 12px; border: 0; border-radius: 4px;
-  background: transparent; color: #2d3b45; font-size: 20px; cursor: pointer;
-}
-#breadcrumbs ul { list-style: none; display: flex; gap: 8px; font-size: 18px; }
-#breadcrumbs li + li::before { content: ">"; margin-right: 8px; color: #6b7780; }
-#breadcrumbs li.home a::before { content: "\2302"; color: #2d3b45; font-size: 22px; line-height: 1; }
-.ic-Layout-columns { position: relative; box-sizing: border-box; z-index: 10; flex: 1 0 auto; min-width: 1px; }
-.ic-app-main-content { box-sizing: border-box; flex: 1; min-width: 1px; }
-.ic-Layout-contentWrapper { box-sizing: border-box; }
-.ic-Layout-contentMain { padding: 36px 48px 48px; }
-#right-side-wrapper { display: none; position: relative; }
-.with-right-side #right-side-wrapper { display: block; }
-.ic-app-main-content__secondary { box-sizing: border-box; min-width: 1px; padding: 24px; }
-#right-side { position: relative; z-index: 10; min-height: 20px; }
-#left-side {
-  position: absolute; top: 0; right: 100%; box-sizing: border-box;
-  width: 192px; padding: 24px 12px 12px 24px;
-}
-#section-tabs-header-subtitle { display: block; padding: 0 0 12px 12px; font-size: 12px; color: #6b7780; }
-#section-tabs { list-style: none; }
-#section-tabs a {
-  display: block; padding: 5px 8px 5px 12px; font-size: 14px;
-  border-left: 3px solid transparent; color: #2b7abc;
-}
-#section-tabs a.active { border-left-color: #2d3b45; color: #2d3b45; font-weight: 700; }
-
-@media (min-width: 992px) {
-  .ic-Layout-wrapper { margin-left: 84px; }
-  body.course-menu-expanded .ic-Layout-columns { margin-left: 192px; }
-  body:not(.course-menu-expanded) .ic-app-main-content { display: flex; }
-  body:not(.course-menu-expanded) .ic-Layout-contentWrapper { flex: 1; min-width: 1px; }
-  body:not(.course-menu-expanded) .ic-app-main-content__secondary { flex: none; width: 288px; padding-left: 24px; }
-}
-@media (min-width: 1140px) {
-  body.course-menu-expanded .ic-app-main-content { display: flex; }
-  body.course-menu-expanded .ic-Layout-contentWrapper { flex: 1; min-width: 1px; }
-  body.course-menu-expanded .ic-app-main-content__secondary { flex: none; width: 288px; padding-left: 24px; }
-}
-@media (max-width: 991px) {
-  .ic-app-header { display: none; }
-  #mobile-header {
-    display: flex; align-items: center; gap: 12px; height: 50px; padding: 0 12px;
-    background: #394b58; color: #fff;
-  }
-  .mobile-header-title { flex: 1; text-align: center; font-weight: 700; }
-  #left-side, .ic-app-nav-toggle-and-crumbs { display: none !important; }
-  .ic-Layout-contentMain { padding: 24px 12px; }
-  .ic-app-main-content__secondary { padding-left: 12px; padding-right: 12px; }
-}
-
-/* Buttons */
-.btn, .Button {
-  display: inline-block; box-sizing: border-box; padding: 8px 14px;
-  border: 1px solid #c7cdd1; border-radius: 4px; background: #f5f5f5;
-  color: #2d3b45; font-size: 14px; line-height: 20px; cursor: pointer;
-}
-.btn:hover, .Button:hover { text-decoration: none; background: #e8eaec; }
-.button-sidebar-wide { display: block; width: 100%; margin-bottom: 6px; text-align: left; }
-
-/* Right side */
-#right-side h2, #right-side .h2 {
-  overflow: hidden; margin: 0 0 6px; padding-bottom: 6px;
-  border-bottom: 1px solid #c7cdd1; font-size: 16px; font-weight: 700;
-}
-#right-side .shared-space { display: flex; align-items: baseline; justify-content: space-between; padding-bottom: 0; }
-#right-side .shared-space h2 { display: inline-block; margin-bottom: 0; padding-bottom: 0; border-bottom-style: none; }
-#right-side .todo-list-header { margin-top: 17px; }
-#right-side .events_list { margin-top: 17px; }
-.event-list-view-calendar { font-size: 12px; }
-#right-side .right-side-list { list-style: none; margin: -6px 0 12px; }
-#right-side .right-side-list li a { display: flex; padding: 12px 0; font-size: 14px; }
-#right-side .right-side-list li a:hover { text-decoration: none; }
-#right-side .right-side-list li a > i {
-  box-sizing: border-box; min-width: 24px; padding-right: 12px; color: #6b7780; font-style: normal;
-}
-#right-side .right-side-list b, #right-side .right-side-list em, #right-side .right-side-list p {
-  display: block; font-weight: 400; line-height: 1.3;
-}
-#right-side .right-side-list p, #right-side .right-side-list .more_link { margin-bottom: 0; font-size: 12px; color: #6b7780; }
-#right-side .right-side-list small { display: block; font-size: 13px; }
-#right-side .right-side-list .todo-badge-wrapper { min-width: 40px; padding-right: 12px; box-sizing: border-box; text-align: right; }
-.todo-badge {
-  display: inline-block; min-width: 18px; padding: 0 4px; border-radius: 9px;
-  background: #e72429; color: #fff; font-size: 12px; text-align: center;
-}
-.todo-list { margin-top: 6px; }
-
-/* Student To Do list that React renders into .Sidebar__TodoListContainer */
-#planner-todosidebar-item-list { list-style: none; margin: 0; padding: 0; }
-.ToDoSidebarItem { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; }
-.ToDoSidebarItem__Icon { flex: none; width: 16px; height: 16px; margin-top: 3px; color: #6b7780; }
-.ToDoSidebarItem__Info { flex: 1; min-width: 0; font-size: 14px; line-height: 1.35; }
-.ToDoSidebarItem__Title a { color: #2b7abc; }
-.fixture-todo-context { display: block; margin-top: 2px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.02em; }
-.fixture-info-row { list-style: none; font-size: 12px; color: #6b7780; }
-.fixture-info-row li { display: inline; }
-.fixture-info-row li + li::before { content: " | "; white-space: pre; }
-.ToDoSidebarItem__Close button {
-  width: 24px; height: 24px; border: 0; border-radius: 4px;
-  background: transparent; color: #6b7780; cursor: pointer;
-}
-.fixture-show-all { margin-top: 6px; text-align: center; font-size: 14px; }
-.fixture-show-all button { border: 0; background: none; color: #2b7abc; cursor: pointer; }
-
-/* Dashboard */
-.ic-Dashboard-header__layout {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 24px; padding-bottom: 12px; border-bottom: 1px solid #c7cdd1;
-}
-.ic-Dashboard-header__title { font-size: 28px; }
-.ic-Dashboard-header__actions { display: flex; align-items: center; gap: 12px; }
-.ic-DashboardCard__box { display: flex; flex-wrap: wrap; gap: 0 36px; }
-.ic-DashboardCard {
-  width: 262px; margin-bottom: 36px; overflow: hidden;
-  border-radius: 4px; background: #fff; box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
-}
-.ic-DashboardCard__header_hero { height: 146px; }
-.ic-DashboardCard__header_content { padding: 12px 24px 6px; }
-.ic-DashboardCard__header-title { margin: 0 0 4px; font-size: 16px; font-weight: 700; }
-.ic-DashboardCard__header-subtitle { font-size: 14px; color: #273540; }
-.ic-DashboardCard__header-term { font-size: 12px; color: #6b7780; }
-.ic-DashboardCard__action-container { display: flex; gap: 24px; padding: 6px 24px 14px; }
-.ic-DashboardCard__action { width: 24px; height: 24px; border-radius: 4px; background: #e8eaec; }
-.ic-Dashboard-Activity .recent_activity { list-style: none; }
-.stream-category {
-  margin-bottom: 12px; padding: 12px 16px;
-  border: 1px solid #c7cdd1; border-radius: 4px;
-}
-.stream-category .category_name { font-weight: 700; }
-.stream-category .details { font-size: 14px; color: #6b7780; }
-.CanvasPlanner__HeaderContainer .Button + .Button { margin-left: 8px; }
-.fixture-planner-day { padding: 12px 0; border-top: 1px solid #c7cdd1; }
-.fixture-planner-day h2 { margin-bottom: 8px; font-size: 18px; font-weight: 700; }
-.fixture-planner-item {
-  display: flex; align-items: center; gap: 12px; margin-bottom: 8px; padding: 10px 12px;
-  border-left: 4px solid #c7cdd1; background: #f5f5f5; font-size: 14px;
-}
-.fixture-planner-item .fixture-planner-course { min-width: 120px; font-size: 12px; text-transform: uppercase; }
-
-/* Widget dashboard */
-.fixture-widget-header { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
-.fixture-widget-header h1 { flex: 1; font-size: 28px; }
-.fixture-widget-tabs { display: flex; gap: 24px; margin-bottom: 24px; border-bottom: 1px solid #c7cdd1; }
-.fixture-widget-tabs span { padding: 8px 0; }
-.fixture-widget-tabs span[aria-selected="true"] { border-bottom: 3px solid #2b7abc; font-weight: 700; }
-[data-testid="widget-columns"] { display: flex; align-items: flex-start; gap: 12px; }
-[data-testid="widget-column-1"] { flex: 2; min-width: 0; }
-[data-testid="widget-column-2"] { flex: 1; min-width: 0; }
-@media (max-width: 1379px) { [data-testid="widget-columns"] { flex-direction: column; align-items: stretch; } }
-.fixture-widget {
-  margin-bottom: 12px; padding: 20px 24px;
-  border: 1px solid #d7dade; border-radius: 12px; background: #fff;
-}
-.fixture-widget h2 { margin-bottom: 12px; font-size: 18px; font-weight: 700; }
-.fixture-widget ul { list-style: none; }
-.fixture-widget li { padding: 8px 0; border-top: 1px solid #eef0f2; font-size: 14px; }
-
-/* Course home */
-.context_module {
-  margin-bottom: 24px; border: 1px solid #c7cdd1; border-radius: 4px; overflow: hidden;
-}
-.context_module .ig-header { padding: 10px 16px; background: #f5f5f5; font-weight: 700; }
-.context_module .ig-list { list-style: none; }
-.context_module .ig-row { padding: 10px 16px 10px 40px; border-top: 1px solid #e8eaec; font-size: 14px; }
-.context_module .ig-details { display: block; font-size: 12px; color: #6b7780; }
-
-/* K-5 subject */
-.k5-subject-header { margin: -36px -48px 24px; padding: 32px 48px; color: #fff; }
-.k5-subject-header h1 { font-size: 32px; font-weight: 700; }
-.k5-tabs { display: flex; gap: 8px; margin-bottom: 24px; }
-.k5-tabs span { padding: 8px 16px; border-radius: 18px; background: #f5f5f5; font-weight: 700; }
-.k5-tabs span[aria-selected="true"] { background: #2d3b45; color: #fff; }
-.k5-card { margin-bottom: 12px; padding: 16px; border: 1px solid #c7cdd1; border-radius: 8px; }
-
-.mobile-header-hamburger { border: 0; background: transparent; color: #fff; font-size: 22px; }
-  </style>
-  <script>
-    INST = {"environment": "production", "allowMediaComments": true, "kalturaSettings": {"domain": "nv.instructuremedia.com", "resource_domain": "nv.instructuremedia.com", "rtmp_domain": "iad.rtmp.instructuremedia.com", "partner_id": "9", "subpartner_id": "0", "player_ui_conf": "1", "kcw_ui_conf": "1", "upload_ui_conf": "1", "max_file_size_bytes": -1, "do_analytics": false, "hide_rte_button": false, "js_uploader": true}, "logPageViews": true, "maxVisibleEditorButtons": 3, "editorButtons": []};
-    ENV = {
-  "ASSET_HOST": "https://du11hjcvx0uqb.cloudfront.net",
-  "active_brand_config_json_url": "https://du11hjcvx0uqb.cloudfront.net/dist/brandable_css/a1b2c3d4e5f60718293a4b5c6d7e8f90/variables-7dd4b80918af0e0218ec0229e4bd5873.json",
-  "active_brand_config": null,
-  "confetti_branding_enabled": false,
-  "captcha_site_key": null,
-  "current_user_id": "5501",
-  "current_user_global_id": "10000000005501",
-  "current_user_roles": [
-    "user",
-    "student"
-  ],
-  "current_user_is_student": true,
-  "current_user_types": [],
-  "current_user_disabled_inbox": false,
-  "current_user_visited_tabs": null,
-  "discussions_reporting": true,
-  "files_domain": "cluster41.canvas-user-content.com",
-  "group_information": null,
-  "DOMAIN_ROOT_ACCOUNT_ID": "1",
-  "DOMAIN_ROOT_ACCOUNT_UUID": "Hc4tR1tFXJn0WzRyQ8nZbV2Ld7oPq3sKa9EuYmGi",
-  "k12": false,
-  "help_link_name": "Help",
-  "help_link_icon": "help",
-  "use_high_contrast": false,
-  "auto_show_cc": false,
-  "disable_celebrations": false,
-  "disable_keyboard_shortcuts": false,
-  "LTI_LAUNCH_FRAME_ALLOWANCES": [
-    "geolocation *",
-    "microphone *",
-    "camera *",
-    "midi *",
-    "encrypted-media *",
-    "autoplay *",
-    "clipboard-write *",
-    "display-capture *"
-  ],
-  "DEEP_LINKING_POST_MESSAGE_ORIGIN": "https://school.instructure.com",
-  "comment_library_suggestions_enabled": false,
-  "SETTINGS": {
-    "open_registration": false,
-    "collapse_global_nav": false,
-    "release_notes_badge_disabled": false,
-    "can_add_pronouns": false,
-    "show_sections_in_course_tray": true
-  },
-  "RAILS_ENVIRONMENT": "Production",
-  "IN_PACED_COURSE": false,
-  "PREFERENCES": {
-    "dashboard_view": "cards",
-    "hide_dashcard_color_overlays": false,
-    "custom_colors": {
-      "course_101": "#0B874B",
-      "course_102": "#E71F63",
-      "course_103": "#8F3E97",
-      "course_105": "#65499D",
-      "course_106": "#FC5E13"
-    },
-    "learner_dashboard_tab_selection": "dashboard",
-    "widget_dashboard_config": {}
-  },
-  "current_user": {
-    "id": "5501",
-    "anonymous_id": "48d",
-    "display_name": "Jordan Rivera",
-    "avatar_image_url": "https://school.instructure.com/images/messages/avatar-50.png",
-    "html_url": "https://school.instructure.com/about/5501",
-    "pronouns": null,
-    "avatar_is_fallback": true,
-    "email": "jrivera@students.northfield.edu"
-  },
-  "page_view_update_url": "/page_views/9c1d2e3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f?page_view_token=eyJpIjoiOWMxZDJlM2YifQ",
-  "IS_LARGE_ROSTER": false,
-  "context_asset_string": "user_5501",
-  "TIMEZONE": "America/New_York",
-  "CONTEXT_TIMEZONE": "America/New_York",
-  "LOCALE": "en",
-  "LOCALES": [
-    "en"
-  ],
-  "BIGEASY_LOCALE": "en_US",
-  "FULLCALENDAR_LOCALE": "en",
-  "MOMENT_LOCALE": "en",
-  "rce_auto_save_max_age_ms": 86400000,
-  "K5_USER": false,
-  "USE_CLASSIC_FONT": false,
-  "K5_HOMEROOM_COURSE": false,
-  "K5_SUBJECT_COURSE": false,
-  "LOCALE_TRANSLATION_FILE": "https://du11hjcvx0uqb.cloudfront.net/dist/javascripts/translations/en-7d3e3f0d6b.json",
-  "DEFAULT_USER_PRONOUNS": [],
-  "FEATURES": {
-    "instui_header": false,
-    "explicit_latex_typesetting": false,
-    "media_links_use_attachment_id": true,
-    "rce_find_replace": true,
-    "top_navigation_placement": false,
-    "render_both_to_do_lists": false
-  },
-  "notices": [],
-  "active_context_tab": null,
-  "STUDENT_PLANNER_ENABLED": true,
-  "STUDENT_PLANNER_COURSES": [
-    {
-      "longName": "HIST 205: The Atlantic World - HIST 205",
-      "shortName": "History",
-      "originalName": "HIST 205: The Atlantic World",
-      "courseCode": "HIST 205",
-      "assetString": "course_103",
-      "href": "/courses/103",
-      "term": "Fall 2026",
-      "subtitle": "enrolled as: Student",
-      "enrollmentState": "active",
-      "enrollmentType": "StudentEnrollment",
-      "observee": null,
-      "id": "103",
-      "isFavorited": true,
-      "isK5Subject": false,
-      "isHomeroom": false,
-      "useClassicFont": false,
-      "canManage": false,
-      "canReadAnnouncements": true,
-      "image": null,
-      "color": "#8F3E97",
-      "position": 0
-    },
-    {
-      "longName": "BIO 110: Principles of Biology - BIO 110",
-      "shortName": "BIO 110: Principles of Biology",
-      "originalName": "BIO 110: Principles of Biology",
-      "courseCode": "BIO 110",
-      "assetString": "course_101",
-      "href": "/courses/101",
-      "term": "Fall 2026",
-      "subtitle": "enrolled as: Student",
-      "enrollmentState": "active",
-      "enrollmentType": "StudentEnrollment",
-      "observee": null,
-      "id": "101",
-      "isFavorited": true,
-      "isK5Subject": false,
-      "isHomeroom": false,
-      "useClassicFont": false,
-      "canManage": false,
-      "canReadAnnouncements": true,
-      "image": null,
-      "color": "#0B874B",
-      "position": 1
-    },
-    {
-      "longName": "MATH 221: Calculus II - MATH 221",
-      "shortName": "MATH 221: Calculus II",
-      "originalName": "MATH 221: Calculus II",
-      "courseCode": "MATH 221",
-      "assetString": "course_102",
-      "href": "/courses/102",
-      "term": "Fall 2026",
-      "subtitle": "enrolled as: Student",
-      "enrollmentState": "active",
-      "enrollmentType": "StudentEnrollment",
-      "observee": null,
-      "id": "102",
-      "isFavorited": true,
-      "isK5Subject": false,
-      "isHomeroom": false,
-      "useClassicFont": false,
-      "canManage": false,
-      "canReadAnnouncements": true,
-      "image": null,
-      "color": "#E71F63",
-      "position": 2
-    },
-    {
-      "longName": "CHEM 120: General Chemistry - CHEM 120",
-      "shortName": "CHEM 120: General Chemistry",
-      "originalName": "CHEM 120: General Chemistry",
-      "courseCode": "CHEM 120",
-      "assetString": "course_104",
-      "href": "/courses/104",
-      "term": "Fall 2026",
-      "subtitle": "enrolled as: Student",
-      "enrollmentState": "active",
-      "enrollmentType": "StudentEnrollment",
-      "observee": null,
-      "id": "104",
-      "isFavorited": true,
-      "isK5Subject": false,
-      "isHomeroom": false,
-      "useClassicFont": false,
-      "canManage": false,
-      "canReadAnnouncements": true,
-      "image": null,
-      "color": null,
-      "position": 3
-    },
-    {
-      "longName": "Intramural Ultimate Frisbee Club - ULTIMATE",
-      "shortName": "Intramural Ultimate Frisbee Club",
-      "originalName": "Intramural Ultimate Frisbee Club",
-      "courseCode": "ULTIMATE",
-      "assetString": "course_106",
-      "href": "/courses/106",
-      "term": "Default Term",
-      "subtitle": "enrolled as: Student",
-      "enrollmentState": "active",
-      "enrollmentType": "StudentEnrollment",
-      "observee": null,
-      "id": "106",
-      "isFavorited": true,
-      "isK5Subject": false,
-      "isHomeroom": false,
-      "useClassicFont": false,
-      "canManage": false,
-      "canReadAnnouncements": true,
-      "image": null,
-      "color": "#FC5E13",
-      "position": 4
-    },
-    {
-      "longName": "Student Success Orientation - SSO 100",
-      "shortName": "Student Success Orientation",
-      "originalName": "Student Success Orientation",
-      "courseCode": "SSO 100",
-      "assetString": "course_105",
-      "href": "/courses/105",
-      "term": "Continuing Students",
-      "subtitle": "enrolled as: Student",
-      "enrollmentState": "active",
-      "enrollmentType": "StudentEnrollment",
-      "observee": null,
-      "id": "105",
-      "isFavorited": true,
-      "isK5Subject": false,
-      "isHomeroom": false,
-      "useClassicFont": false,
-      "canManage": false,
-      "canReadAnnouncements": true,
-      "image": null,
-      "color": "#65499D",
-      "position": 5
-    }
-  ],
-  "STUDENT_PLANNER_GROUPS": [
-    {
-      "id": "9001",
-      "assetString": "group_9001",
-      "name": "Lab Group 4",
-      "url": "/groups/9001"
-    },
-    {
-      "id": "184270000000004321",
-      "assetString": "group_184270000000004321",
-      "name": "Honors Society",
-      "url": "/groups/184270000000004321"
-    }
-  ],
-  "OBSERVED_USERS_LIST": [],
-  "OBSERVED_USER_ID": null,
-  "CAN_ADD_OBSERVEE": false,
-  "WIDGET_DASHBOARD_DARK_MODE": false,
-  "DASHBOARD_FEATURES": {
-    "widget_dashboard_dark_mode": false,
-    "platform_ui_unified_widgets_dashboard": true,
-    "educator_dashboard": false
-  },
-  "widget_dashboard_overridable": true
-};
-    BRANDABLE_CSS_HANDLEBARS_INDEX = [];
-    REMOTES = {};
-  </script>
-</head>
-<body class="primary-nav-expanded">
 <div id="flash_message_holder"></div>
 <div id="application" class="ic-app">
   <header id="mobile-header" class="no-print">
@@ -597,7 +74,7 @@ body:not(.full-width) .ic-Layout-wrapper { max-width: 1366px; }
           </div>
         </div>
         <div id="right-side-wrapper" class="ic-app-main-content__secondary">
-          <aside id="right-side"></aside>
+          <aside id="right-side" style="display: none;"></aside>
         </div>
       </div>
     </div>
@@ -618,66 +95,409 @@ body:not(.full-width) .ic-Layout-wrapper { max-width: 1366px; }
     <span role="tab" aria-selected="false" data-testid="tab-courses">Courses</span>
   </div>
   <div data-testid="dashboard-tab-content">
+    <div class="fixture-widget-grid">
     <div data-testid="widget-columns">
       <div data-testid="widget-column-1">
         <div data-testid="widget-container-course-work-combined-widget" class="fixture-widget">
-          <h2>Course work</h2>
-          <p>Due soon: 6 &bull; Missing: 4 &bull; Submitted: 9</p>
-          <ul>
-            <li><a href="/courses/101/assignments/1012">Quiz 3: Cell membranes</a> &bull; BIO 110 &bull; Due today at 11:59pm</li>
-            <li><a href="/courses/101/assignments/1004">Lab report 4: Cellular respiration</a> &bull; BIO 110 &bull; Due Oct 28</li>
-            <li><a href="/courses/102/assignments/2009">Quiz: Integration by parts</a> &bull; MATH 221 &bull; Due Oct 29</li>
-          </ul>
+          <section class="fx-section" data-testid="widget-course-work-combined-widget" role="region" aria-labelledby="course-work-combined-widget-heading">
+            <div class="fx-col fx-gap-s">
+              <div class="fx-row fx-between"><h2 id="course-work-combined-widget-heading" class="fx-h2">Course work</h2></div>
+              <div class="fx-rel">
+                <div class="fx-col fx-gap-s">
+                  <div class="fx-row fx-wrap fx-gap-s">
+                    <div class="fx-grow">
+                  <div class="fx-field">
+                    <label for="cw-course">Course filter:</label>
+                    <div class="fx-select"><input id="cw-course" class="fx-input" type="text" role="combobox" aria-autocomplete="none" aria-expanded="false" readonly value="All Courses" data-testid="course-filter-select"><span class="fx-caret" aria-hidden="true"></span></div>
+                  </div>
+                    </div>
+                    <div class="fx-grow">
+                  <div class="fx-field">
+                    <label for="cw-status">Submission status:</label>
+                    <div class="fx-select"><input id="cw-status" class="fx-input" type="text" role="combobox" aria-autocomplete="none" aria-expanded="false" readonly value="Not submitted" data-testid="submission-status-filter-select"><span class="fx-caret" aria-hidden="true"></span></div>
+                  </div>
+                    </div>
+                  </div>
+                  <div class="fx-row fx-gap-xs fx-stats">
+                    <div class="fx-stat" data-testid="statistics-card-Due"><span class="fx-stat-n" style="color:var(--fx-stat-blue)">8</span><div class="fx-small">Due</div></div>
+                    <div class="fx-stat" data-testid="statistics-card-Missing"><span class="fx-stat-n" style="color:var(--fx-stat-red)">4</span><div class="fx-small">Missing</div></div>
+                    <div class="fx-stat" data-testid="statistics-card-Submitted"><span class="fx-stat-n" style="color:var(--fx-stat-green)">9</span><div class="fx-small">Submitted</div></div>
+                  </div>
+                  <div>
+                    <ul class="fx-unstyled">
+              <li class="fx-li">
+                <div class="fx-item-wrap" role="group" aria-label="Quiz 3: Cell membranes" data-testid="listed-course-work-item-1012">
+                  <div class="fx-item">
+                    <div class="fx-ib fx-b-blue"><span class="fx-ic fx-c-blue"><svg data-testid="quiz-icon" viewBox="0 0 1920 1920" width="24" height="24" fill="currentColor" aria-hidden="true" focusable="false" role="presentation"><path d="M960 0c530.4 0 960 429.6 960 960s-429.6 960-960 960S0 1490.4 0 960 429.6 0 960 0Zm0 120C496 120 120 496 120 960s376 840 840 840 840-376 840-840S1424 120 960 120Zm0 1140a90 90 0 1 1 0 180 90 90 0 0 1 0-180Zm0-780c200 0 360 130 360 300 0 140-90 210-190 270-60 40-110 70-110 150H850c0-130 80-180 150-230 70-40 130-80 130-190 0-80-80-180-170-180s-170 100-170 180H640c0-170 120-300 320-300Z" fill-rule="evenodd"/></svg></span></div>
+                    <div class="fx-grow fx-min0">
+                      <a class="fx-link fx-bold" href="/courses/101/assignments/1012" data-testid="course-work-item-link-1012"><span class="fx-small">Quiz 3: Cell membranes</span></a>
+                      <div class="fx-row fx-gap-xs fx-xsmall fx-secondary"><span>BIO 110: Principles of Biology</span><span>|</span><a class="fx-link" href="/courses/101" aria-label="Go to BIO 110: Principles of Biology" data-testid="course-work-item-course-link-1012"><span>Go to course</span></a></div>
+                      <div class="fx-xsmall fx-secondary">20 pts</div>
+                    </div>
+                    <span class="fx-pill fx-b-blue fx-c-blue" data-testid="due_soon-status-pill-1012">Today 11:59 PM</span>
+                  </div>
+                </div>
+              </li>
+              <li class="fx-li">
+                <div class="fx-item-wrap" role="group" aria-label="Lab report 4: Cellular respiration" data-testid="listed-course-work-item-1004">
+                  <div class="fx-item">
+                    <div class="fx-ib fx-b-blue"><span class="fx-ic fx-c-blue"><svg data-testid="assignment-icon" viewBox="0 0 1920 1920" width="24" height="24" fill="currentColor" aria-hidden="true" focusable="false" role="presentation"><path d="M1468 0v520h-120V120H120v1680h1228v-400h120v520H0V0h1468Zm333 700 85 85-691 692-452-452 85-85 367 367 606-607Z" fill-rule="evenodd"/></svg></span></div>
+                    <div class="fx-grow fx-min0">
+                      <a class="fx-link fx-bold" href="/courses/101/assignments/1004" data-testid="course-work-item-link-1004"><span class="fx-small">Lab report 4: Cellular respiration</span></a>
+                      <div class="fx-row fx-gap-xs fx-xsmall fx-secondary"><span>BIO 110: Principles of Biology</span><span>|</span><a class="fx-link" href="/courses/101" aria-label="Go to BIO 110: Principles of Biology" data-testid="course-work-item-course-link-1004"><span>Go to course</span></a></div>
+                      <div class="fx-xsmall fx-secondary">50 pts</div>
+                    </div>
+                    <span class="fx-pill fx-b-blue fx-c-blue" data-testid="due_soon-status-pill-1004">10/28/2026 11:59 PM</span>
+                  </div>
+                </div>
+              </li>
+              <li class="fx-li">
+                <div class="fx-item-wrap" role="group" aria-label="Quiz: Integration by parts" data-testid="listed-course-work-item-2009">
+                  <div class="fx-item">
+                    <div class="fx-ib fx-b-blue"><span class="fx-ic fx-c-blue"><svg data-testid="quiz-icon" viewBox="0 0 1920 1920" width="24" height="24" fill="currentColor" aria-hidden="true" focusable="false" role="presentation"><path d="M960 0c530.4 0 960 429.6 960 960s-429.6 960-960 960S0 1490.4 0 960 429.6 0 960 0Zm0 120C496 120 120 496 120 960s376 840 840 840 840-376 840-840S1424 120 960 120Zm0 1140a90 90 0 1 1 0 180 90 90 0 0 1 0-180Zm0-780c200 0 360 130 360 300 0 140-90 210-190 270-60 40-110 70-110 150H850c0-130 80-180 150-230 70-40 130-80 130-190 0-80-80-180-170-180s-170 100-170 180H640c0-170 120-300 320-300Z" fill-rule="evenodd"/></svg></span></div>
+                    <div class="fx-grow fx-min0">
+                      <a class="fx-link fx-bold" href="/courses/102/assignments/2009" data-testid="course-work-item-link-2009"><span class="fx-small">Quiz: Integration by parts</span></a>
+                      <div class="fx-row fx-gap-xs fx-xsmall fx-secondary"><span>MATH 221: Calculus II</span><span>|</span><a class="fx-link" href="/courses/102" aria-label="Go to MATH 221: Calculus II" data-testid="course-work-item-course-link-2009"><span>Go to course</span></a></div>
+                      <div class="fx-xsmall fx-secondary">25 pts</div>
+                    </div>
+                    <span class="fx-pill fx-b-blue fx-c-blue" data-testid="due_soon-status-pill-2009">10/29/2026 11:59 PM</span>
+                  </div>
+                </div>
+              </li>
+              <li class="fx-li">
+                <div class="fx-item-wrap" role="group" aria-label="Debate 2: Was the Atlantic world one system?" data-testid="listed-course-work-item-3010">
+                  <div class="fx-item">
+                    <div class="fx-ib fx-b-blue"><span class="fx-ic fx-c-blue"><svg data-testid="discussion-icon" viewBox="0 0 1920 1920" width="24" height="24" fill="currentColor" aria-hidden="true" focusable="false" role="presentation"><path d="M1920 0v1440h-571l-389 389-389-389H0V0h1920Zm-120 120H120v1200h679l161 161 161-161h679V120ZM1500 480v120H420V480h1080Zm0 360v120H420V840h1080Z" fill-rule="evenodd"/></svg></span></div>
+                    <div class="fx-grow fx-min0">
+                      <a class="fx-link fx-bold" href="/courses/103/assignments/3010" data-testid="course-work-item-link-3010"><span class="fx-small">Debate 2: Was the Atlantic world one system?</span></a>
+                      <div class="fx-row fx-gap-xs fx-xsmall fx-secondary"><span>History</span><span>|</span><a class="fx-link" href="/courses/103" aria-label="Go to History" data-testid="course-work-item-course-link-3010"><span>Go to course</span></a></div>
+                      <div class="fx-xsmall fx-secondary">30 pts</div>
+                    </div>
+                    <span class="fx-pill fx-b-blue fx-c-blue" data-testid="due_soon-status-pill-3010">10/29/2026 11:59 PM</span>
+                  </div>
+                </div>
+              </li>
+              <li class="fx-li">
+                <div class="fx-item-wrap" role="group" aria-label="Lab 7: Titration notebook" data-testid="listed-course-work-item-4003">
+                  <div class="fx-item">
+                    <div class="fx-ib fx-b-blue"><span class="fx-ic fx-c-blue"><svg data-testid="assignment-icon" viewBox="0 0 1920 1920" width="24" height="24" fill="currentColor" aria-hidden="true" focusable="false" role="presentation"><path d="M1468 0v520h-120V120H120v1680h1228v-400h120v520H0V0h1468Zm333 700 85 85-691 692-452-452 85-85 367 367 606-607Z" fill-rule="evenodd"/></svg></span></div>
+                    <div class="fx-grow fx-min0">
+                      <a class="fx-link fx-bold" href="/courses/104/assignments/4003" data-testid="course-work-item-link-4003"><span class="fx-small">Lab 7: Titration notebook</span></a>
+                      <div class="fx-row fx-gap-xs fx-xsmall fx-secondary"><span>CHEM 120: General Chemistry</span><span>|</span><a class="fx-link" href="/courses/104" aria-label="Go to CHEM 120: General Chemistry" data-testid="course-work-item-course-link-4003"><span>Go to course</span></a></div>
+                      <div class="fx-xsmall fx-secondary">40 pts</div>
+                    </div>
+                    <span class="fx-pill fx-b-blue fx-c-blue" data-testid="due_soon-status-pill-4003">10/30/2026 11:59 PM</span>
+                  </div>
+                </div>
+              </li>
+              <li class="fx-li">
+                <div class="fx-item-wrap" role="group" aria-label="Participation: Week 9" data-testid="listed-course-work-item-3050">
+                  <div class="fx-item">
+                    <div class="fx-ib fx-b-blue"><span class="fx-ic fx-c-blue"><svg data-testid="assignment-icon" viewBox="0 0 1920 1920" width="24" height="24" fill="currentColor" aria-hidden="true" focusable="false" role="presentation"><path d="M1468 0v520h-120V120H120v1680h1228v-400h120v520H0V0h1468Zm333 700 85 85-691 692-452-452 85-85 367 367 606-607Z" fill-rule="evenodd"/></svg></span></div>
+                    <div class="fx-grow fx-min0">
+                      <a class="fx-link fx-bold" href="/courses/103/assignments/3050" data-testid="course-work-item-link-3050"><span class="fx-small">Participation: Week 9</span></a>
+                      <div class="fx-row fx-gap-xs fx-xsmall fx-secondary"><span>History</span><span>|</span><a class="fx-link" href="/courses/103" aria-label="Go to History" data-testid="course-work-item-course-link-3050"><span>Go to course</span></a></div>
+                      <div class="fx-xsmall fx-secondary">10 pts</div>
+                    </div>
+                    <span class="fx-pill fx-b-blue fx-c-blue" data-testid="due_soon-status-pill-3050">10/31/2026 11:59 PM</span>
+                  </div>
+                </div>
+              </li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+              <div class="fx-pager" data-testid="pagination-container">
+                <nav aria-label="Course work pagination"><span class="fx-page fx-page-on">1</span><span class="fx-page">2</span><span class="fx-page">3</span><span class="fx-page">…</span><span class="fx-page">8</span></nav>
+              </div>
+            </div>
+          </section>
         </div>
         <div data-testid="widget-container-course-grades-widget" class="fixture-widget">
-          <h2>Course grades</h2>
+          <section class="fx-section" data-testid="widget-course-grades-widget" role="region" aria-labelledby="course-grades-widget-heading">
+            <div class="fx-col fx-gap-s">
+              <div class="fx-row fx-between fx-wrap"><h2 id="course-grades-widget-heading" class="fx-h2">Course grades</h2><label class="fx-toggle"><input type="checkbox" checked data-testid="hide-all-grades-checkbox"><span>Show all grades</span></label></div>
+              <div class="fx-rel">
+          <div role="list" aria-label="Course grades" class="fx-grid">
+            <div class="fx-card" role="listitem" aria-label="History" data-testid="course-grade-card-103">
+              <div class="fx-card-head" style="background-color:#8F3E97">
+                <div class="fx-card-grade"><div class="fx-grade-pill"><span class="fx-grade" data-testid="course-103-grade">91%</span><button type="button" class="fx-iconbtn" data-testid="hide-single-grade-button-103"><span class="fx-sr">Hide grade for History</span><svg viewBox="0 0 1920 1920" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M960 400c400 0 740 250 880 560-140 310-480 560-880 560S220 1270 80 960c140-310 480-560 880-560Zm0 120c-300 0-560 170-700 440 140 270 400 440 700 440s560-170 700-440c-140-270-400-440-700-440Zm0 150a290 290 0 1 1 0 580 290 290 0 0 1 0-580Z" fill-rule="evenodd"/></svg></button></div></div>
+                <div class="fx-card-menu"><button type="button" class="fx-iconbtn"><span class="fx-sr">Course settings for History</span><svg viewBox="0 0 1920 1920" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="300" cy="960" r="150"/><circle cx="960" cy="960" r="150"/><circle cx="1620" cy="960" r="150"/></svg></button></div>
+              </div>
+              <div class="fx-card-body">
+                <div class="fx-card-name" data-testid="course-103-name">History</div>
+                <div class="fx-small fx-secondary" data-testid="course-103-code">HIST 205</div>
+                <div class="fx-small fx-secondary"><span data-testid="course-103-term">Fall 2026</span></div>
+                <div class="fx-small fx-secondary"><span data-testid="course-103-last-updated">Updated Oct 26</span></div>
+              </div>
+              <div class="fx-card-foot"><a class="fx-link fx-small" href="/courses/103/grades" aria-label="View History gradebook" data-testid="course-103-gradebook-link"><span>View Gradebook</span></a><span class="fx-small fx-secondary">|</span><a class="fx-link fx-small" href="/courses/103" aria-label="Go to History" data-testid="course-103-link"><span>Go to Course</span></a></div>
+            </div>
+            <div class="fx-card" role="listitem" aria-label="BIO 110: Principles of Biology" data-testid="course-grade-card-101">
+              <div class="fx-card-head" style="background-color:#0B874B">
+                <div class="fx-card-grade"><div class="fx-grade-pill"><span class="fx-grade" data-testid="course-101-grade">84%</span><button type="button" class="fx-iconbtn" data-testid="hide-single-grade-button-101"><span class="fx-sr">Hide grade for BIO 110: Principles of Biology</span><svg viewBox="0 0 1920 1920" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M960 400c400 0 740 250 880 560-140 310-480 560-880 560S220 1270 80 960c140-310 480-560 880-560Zm0 120c-300 0-560 170-700 440 140 270 400 440 700 440s560-170 700-440c-140-270-400-440-700-440Zm0 150a290 290 0 1 1 0 580 290 290 0 0 1 0-580Z" fill-rule="evenodd"/></svg></button></div></div>
+                <div class="fx-card-menu"><button type="button" class="fx-iconbtn"><span class="fx-sr">Course settings for BIO 110: Principles of Biology</span><svg viewBox="0 0 1920 1920" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="300" cy="960" r="150"/><circle cx="960" cy="960" r="150"/><circle cx="1620" cy="960" r="150"/></svg></button></div>
+              </div>
+              <div class="fx-card-body">
+                <div class="fx-card-name" data-testid="course-101-name">BIO 110: Principles of Biology</div>
+                <div class="fx-small fx-secondary" data-testid="course-101-code">BIO 110</div>
+                <div class="fx-small fx-secondary"><span data-testid="course-101-term">Fall 2026</span></div>
+                <div class="fx-small fx-secondary"><span data-testid="course-101-last-updated">Updated Oct 26</span></div>
+              </div>
+              <div class="fx-card-foot"><a class="fx-link fx-small" href="/courses/101/grades" aria-label="View BIO 110: Principles of Biology gradebook" data-testid="course-101-gradebook-link"><span>View Gradebook</span></a><span class="fx-small fx-secondary">|</span><a class="fx-link fx-small" href="/courses/101" aria-label="Go to BIO 110: Principles of Biology" data-testid="course-101-link"><span>Go to Course</span></a></div>
+            </div>
+            <div class="fx-card" role="listitem" aria-label="MATH 221: Calculus II" data-testid="course-grade-card-102">
+              <div class="fx-card-head" style="background-color:#E71F63">
+                <div class="fx-card-grade"><div class="fx-grade-pill"><span class="fx-grade" data-testid="course-102-grade">78%</span><button type="button" class="fx-iconbtn" data-testid="hide-single-grade-button-102"><span class="fx-sr">Hide grade for MATH 221: Calculus II</span><svg viewBox="0 0 1920 1920" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M960 400c400 0 740 250 880 560-140 310-480 560-880 560S220 1270 80 960c140-310 480-560 880-560Zm0 120c-300 0-560 170-700 440 140 270 400 440 700 440s560-170 700-440c-140-270-400-440-700-440Zm0 150a290 290 0 1 1 0 580 290 290 0 0 1 0-580Z" fill-rule="evenodd"/></svg></button></div></div>
+                <div class="fx-card-menu"><button type="button" class="fx-iconbtn"><span class="fx-sr">Course settings for MATH 221: Calculus II</span><svg viewBox="0 0 1920 1920" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="300" cy="960" r="150"/><circle cx="960" cy="960" r="150"/><circle cx="1620" cy="960" r="150"/></svg></button></div>
+              </div>
+              <div class="fx-card-body">
+                <div class="fx-card-name" data-testid="course-102-name">MATH 221: Calculus II</div>
+                <div class="fx-small fx-secondary" data-testid="course-102-code">MATH 221</div>
+                <div class="fx-small fx-secondary"><span data-testid="course-102-term">Fall 2026</span></div>
+                <div class="fx-small fx-secondary"><span data-testid="course-102-last-updated">Updated Oct 25</span></div>
+              </div>
+              <div class="fx-card-foot"><a class="fx-link fx-small" href="/courses/102/grades" aria-label="View MATH 221: Calculus II gradebook" data-testid="course-102-gradebook-link"><span>View Gradebook</span></a><span class="fx-small fx-secondary">|</span><a class="fx-link fx-small" href="/courses/102" aria-label="Go to MATH 221: Calculus II" data-testid="course-102-link"><span>Go to Course</span></a></div>
+            </div>
+            <div class="fx-card" role="listitem" aria-label="CHEM 120: General Chemistry" data-testid="course-grade-card-104">
+              <div class="fx-card-head" style="background-color:#FFD500">
+                <div class="fx-card-grade"><div class="fx-grade-pill"><span class="fx-grade" data-testid="course-104-grade">88%</span><button type="button" class="fx-iconbtn" data-testid="hide-single-grade-button-104"><span class="fx-sr">Hide grade for CHEM 120: General Chemistry</span><svg viewBox="0 0 1920 1920" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M960 400c400 0 740 250 880 560-140 310-480 560-880 560S220 1270 80 960c140-310 480-560 880-560Zm0 120c-300 0-560 170-700 440 140 270 400 440 700 440s560-170 700-440c-140-270-400-440-700-440Zm0 150a290 290 0 1 1 0 580 290 290 0 0 1 0-580Z" fill-rule="evenodd"/></svg></button></div></div>
+                <div class="fx-card-menu"><button type="button" class="fx-iconbtn"><span class="fx-sr">Course settings for CHEM 120: General Chemistry</span><svg viewBox="0 0 1920 1920" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="300" cy="960" r="150"/><circle cx="960" cy="960" r="150"/><circle cx="1620" cy="960" r="150"/></svg></button></div>
+              </div>
+              <div class="fx-card-body">
+                <div class="fx-card-name" data-testid="course-104-name">CHEM 120: General Chemistry</div>
+                <div class="fx-small fx-secondary" data-testid="course-104-code">CHEM 120</div>
+                <div class="fx-small fx-secondary"><span data-testid="course-104-term">Fall 2026</span></div>
+                <div class="fx-small fx-secondary"><span data-testid="course-104-last-updated">Updated Oct 25</span></div>
+              </div>
+              <div class="fx-card-foot"><a class="fx-link fx-small" href="/courses/104/grades" aria-label="View CHEM 120: General Chemistry gradebook" data-testid="course-104-gradebook-link"><span>View Gradebook</span></a><span class="fx-small fx-secondary">|</span><a class="fx-link fx-small" href="/courses/104" aria-label="Go to CHEM 120: General Chemistry" data-testid="course-104-link"><span>Go to Course</span></a></div>
+            </div>
+            <div class="fx-card" role="listitem" aria-label="Student Success Orientation" data-testid="course-grade-card-105">
+              <div class="fx-card-head" style="background-color:#65499D">
+                <div class="fx-card-grade"><div class="fx-grade-pill"><span class="fx-grade" data-testid="course-105-grade">N/A</span><button type="button" class="fx-iconbtn" data-testid="hide-single-grade-button-105"><span class="fx-sr">Hide grade for Student Success Orientation</span><svg viewBox="0 0 1920 1920" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M960 400c400 0 740 250 880 560-140 310-480 560-880 560S220 1270 80 960c140-310 480-560 880-560Zm0 120c-300 0-560 170-700 440 140 270 400 440 700 440s560-170 700-440c-140-270-400-440-700-440Zm0 150a290 290 0 1 1 0 580 290 290 0 0 1 0-580Z" fill-rule="evenodd"/></svg></button></div></div>
+                <div class="fx-card-menu"><button type="button" class="fx-iconbtn"><span class="fx-sr">Course settings for Student Success Orientation</span><svg viewBox="0 0 1920 1920" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="300" cy="960" r="150"/><circle cx="960" cy="960" r="150"/><circle cx="1620" cy="960" r="150"/></svg></button></div>
+              </div>
+              <div class="fx-card-body">
+                <div class="fx-card-name" data-testid="course-105-name">Student Success Orientation</div>
+                <div class="fx-small fx-secondary" data-testid="course-105-code">SSO 100</div>
+                <div class="fx-small fx-secondary"><span data-testid="course-105-term">Orientation 2023</span></div>
+                <div class="fx-small fx-secondary"><span data-testid="course-105-last-updated">Updated Oct 20</span></div>
+              </div>
+              <div class="fx-card-foot"><a class="fx-link fx-small" href="/courses/105/grades" aria-label="View Student Success Orientation gradebook" data-testid="course-105-gradebook-link"><span>View Gradebook</span></a><span class="fx-small fx-secondary">|</span><a class="fx-link fx-small" href="/courses/105" aria-label="Go to Student Success Orientation" data-testid="course-105-link"><span>Go to Course</span></a></div>
+            </div>
+            <div class="fx-card" role="listitem" aria-label="Intramural Ultimate Frisbee Club" data-testid="course-grade-card-106">
+              <div class="fx-card-head" style="background-color:#FC5E13">
+                <div class="fx-card-grade"><div class="fx-grade-pill"><span class="fx-grade" data-testid="course-106-grade">N/A</span><button type="button" class="fx-iconbtn" data-testid="hide-single-grade-button-106"><span class="fx-sr">Hide grade for Intramural Ultimate Frisbee Club</span><svg viewBox="0 0 1920 1920" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M960 400c400 0 740 250 880 560-140 310-480 560-880 560S220 1270 80 960c140-310 480-560 880-560Zm0 120c-300 0-560 170-700 440 140 270 400 440 700 440s560-170 700-440c-140-270-400-440-700-440Zm0 150a290 290 0 1 1 0 580 290 290 0 0 1 0-580Z" fill-rule="evenodd"/></svg></button></div></div>
+                <div class="fx-card-menu"><button type="button" class="fx-iconbtn"><span class="fx-sr">Course settings for Intramural Ultimate Frisbee Club</span><svg viewBox="0 0 1920 1920" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="300" cy="960" r="150"/><circle cx="960" cy="960" r="150"/><circle cx="1620" cy="960" r="150"/></svg></button></div>
+              </div>
+              <div class="fx-card-body">
+                <div class="fx-card-name" data-testid="course-106-name">Intramural Ultimate Frisbee Club</div>
+                <div class="fx-small fx-secondary" data-testid="course-106-code">ULTIMATE</div>
+                <div class="fx-small fx-secondary"><span data-testid="course-106-term">Default Term</span></div>
+                <div class="fx-small fx-secondary"><span data-testid="course-106-last-updated">Updated Oct 20</span></div>
+              </div>
+              <div class="fx-card-foot"><a class="fx-link fx-small" href="/courses/106/grades" aria-label="View Intramural Ultimate Frisbee Club gradebook" data-testid="course-106-gradebook-link"><span>View Gradebook</span></a><span class="fx-small fx-secondary">|</span><a class="fx-link fx-small" href="/courses/106" aria-label="Go to Intramural Ultimate Frisbee Club" data-testid="course-106-link"><span>Go to Course</span></a></div>
+            </div>
+          </div>
+              </div>
+              <div class="fx-pager" data-testid="pagination-container">
+                <nav aria-label="Course grades pagination"><span class="fx-page fx-page-on">1</span><span class="fx-page">2</span></nav>
+              </div>
+            </div>
+          </section>
+        </div>
+        <div data-testid="widget-container-course-progress-widget" class="fixture-widget">
+          <h2>Course progress</h2>
           <ul>
-            <li>History &bull; 91%</li>
-            <li>BIO 110 &bull; 84%</li>
-            <li>MATH 221 &bull; 78%</li>
+            <li>History &bull; 7 of 11 modules</li>
+            <li>BIO 110 &bull; 5 of 12 modules</li>
+            <li>MATH 221 &bull; 6 of 14 modules</li>
+            <li>CHEM 120 &bull; 4 of 10 modules</li>
+          </ul>
+        </div>
+        <div data-testid="widget-container-recent-grades-widget" class="fixture-widget">
+          <h2>Recent grades</h2>
+          <ul>
+            <li><a href="/courses/101/assignments/1002">Lab report 2: Enzymes</a> &bull; 12 out of 20</li>
+            <li><a href="/courses/102/assignments/2004">Homework 6</a> &bull; 10 out of 10</li>
+            <li><a href="/courses/104/assignments/4001">Lab 5: Stoichiometry notebook</a> &bull; 9 out of 10</li>
+            <li><a href="/courses/103/assignments/3002">Reading response 3</a> &bull; 18 out of 20</li>
+            <li><a href="/courses/102/assignments/2002">Homework 5</a> &bull; 9 out of 10</li>
+          </ul>
+        </div>
+        <div data-testid="widget-container-upcoming-events-widget" class="fixture-widget">
+          <h2>Upcoming events</h2>
+          <ul>
+            <li>Week 9 &bull; Lab section and quiz review</li>
+            <li>Week 9 &bull; Debate preparation workshop</li>
+            <li>Week 10 &bull; Midterm review session</li>
+            <li>Week 10 &bull; Guest lecture: Marine biology</li>
+            <li>Week 10 &bull; Study group, library room 4</li>
+            <li>Week 11 &bull; Poster session</li>
+            <li>Week 11 &bull; Problem set clinic</li>
+            <li>Week 12 &bull; Thanksgiving break begins</li>
+          </ul>
+        </div>
+        <div data-testid="widget-container-course-links-widget" class="fixture-widget">
+          <h2>Course links</h2>
+          <ul>
+            <li><a href="/courses/101">BIO 110: Principles of Biology</a></li>
+            <li><a href="/courses/102">MATH 221: Calculus II</a></li>
+            <li><a href="/courses/103">HIST 205: The Atlantic World</a></li>
+            <li><a href="/courses/104">CHEM 120: General Chemistry</a></li>
+            <li><a href="/courses/105">Orientation</a></li>
+            <li><a href="/courses/101">BIO 110: Lab manual</a></li>
+            <li><a href="/courses/102">MATH 221: Formula sheet</a></li>
+            <li><a href="/courses/103">HIST 205: Reading list</a></li>
+          </ul>
+        </div>
+        <div data-testid="widget-container-attendance-widget" class="fixture-widget">
+          <h2>Attendance</h2>
+          <ul>
+            <li>BIO 110 &bull; 17 of 18 sessions</li>
+            <li>MATH 221 &bull; 20 of 21 sessions</li>
+            <li>HIST 205 &bull; 15 of 16 sessions</li>
+            <li>CHEM 120 &bull; 12 of 13 sessions</li>
+            <li>Orientation &bull; 4 of 4 sessions</li>
+            <li>BIO 110 lab &bull; 8 of 8 sessions</li>
+            <li>CHEM 120 lab &bull; 7 of 8 sessions</li>
           </ul>
         </div>
       </div>
       <div data-testid="widget-column-2">
         <div data-testid="widget-container-announcements-widget" class="fixture-widget">
-          <h2>Announcements</h2>
-          <ul>
-            <li><a href="/courses/101/discussion_topics/31901">Lab room change for Thursday</a> &bull; BIO 110</li>
-            <li><a href="/courses/102/discussion_topics/32901">Office hours move to Thursday this week</a> &bull; MATH 221</li>
-          </ul>
+          <section class="fx-section" data-testid="widget-announcements-widget" role="region" aria-labelledby="announcements-widget-heading">
+            <div class="fx-col fx-gap-s">
+              <div class="fx-row fx-between"><h2 id="announcements-widget-heading" class="fx-h2">Announcements</h2></div>
+              <div class="fx-rel">
+                <div class="fx-col fx-gap-s">
+                  <div class="fx-fi">
+                  <div class="fx-field" style="width:7rem">
+                    <label for="ann-read">Read filter:</label>
+                    <div class="fx-select"><input id="ann-read" class="fx-input" type="text" role="combobox" aria-autocomplete="none" aria-expanded="false" readonly value="Unread" data-testid="announcement-filter-select"><span class="fx-caret" aria-hidden="true"></span></div>
+                  </div>
+                  </div>
+                  <div class="fx-fi">
+                    <div>
+                      <ul class="fx-unstyled">
+              <li class="fx-li">
+                <div class="fx-ann" role="group" aria-label="Lab room change for Thursday" data-testid="announcement-item-31901">
+                  <div class="fx-col fx-gap-xxx">
+                    <div class="fx-row fx-gap-xs">
+                      <span class="fx-avatar" aria-hidden="true">MO</span>
+                      <div class="fx-grow fx-min0 fx-col fx-gap-xxx">
+                        <div class="fx-row fx-between fx-gap-s">
+                          <span class="fx-bold fx-small"><span class="fx-xsmall">Lab room change for Thursday</span></span>
+                          <button type="button" class="fx-iconbtn" aria-pressed="false" data-testid="mark-read-31901"><span class="fx-sr">Mark Lab room change for Thursday as read</span><svg viewBox="0 0 1920 1920" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M960 0c530.4 0 960 429.6 960 960s-429.6 960-960 960S0 1490.4 0 960 429.6 0 960 0Zm0 120C496 120 120 496 120 960s376 840 840 840 840-376 840-840S1424 120 960 120Z" fill-rule="evenodd"/></svg></button>
+                        </div>
+                        <span class="fx-xsmall fx-secondary">Sent by Dr. Maya Okafor | Oct 27, 2026</span>
+                        <span class="fx-xsmall fx-secondary" data-testid="course-name-31901">BIO 110: Principles of Biology</span>
+                      </div>
+                    </div>
+                    <div><span class="fx-xsmall"><span class="fx-xsmall">This Thursday the lab section moves to Science Hall 214 because the usual room is closed for repairs. Bring your goggles and your lab notebook and arrive...</span> </span></div>
+                    <div><a class="fx-link" href="/courses/101/discussion_topics/31901"><span class="fx-small">Read more</span></a></div>
+                  </div>
+                </div>
+              </li>
+              <li class="fx-li">
+                <div class="fx-ann" role="group" aria-label="Office hours move to Thursday this week" data-testid="announcement-item-32901">
+                  <div class="fx-col fx-gap-xxx">
+                    <div class="fx-row fx-gap-xs">
+                      <span class="fx-avatar" aria-hidden="true">ID</span>
+                      <div class="fx-grow fx-min0 fx-col fx-gap-xxx">
+                        <div class="fx-row fx-between fx-gap-s">
+                          <span class="fx-bold fx-small"><span class="fx-xsmall">Office hours move to Thursday this week</span></span>
+                          <button type="button" class="fx-iconbtn" aria-pressed="false" data-testid="mark-read-32901"><span class="fx-sr">Mark Office hours move to Thursday this week as read</span><svg viewBox="0 0 1920 1920" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M960 0c530.4 0 960 429.6 960 960s-429.6 960-960 960S0 1490.4 0 960 429.6 0 960 0Zm0 120C496 120 120 496 120 960s376 840 840 840 840-376 840-840S1424 120 960 120Z" fill-rule="evenodd"/></svg></button>
+                        </div>
+                        <span class="fx-xsmall fx-secondary">Sent by Prof. Ines Duarte | Oct 27, 2026</span>
+                        <span class="fx-xsmall fx-secondary" data-testid="course-name-32901">MATH 221: Calculus II</span>
+                      </div>
+                    </div>
+                    <div><span class="fx-xsmall"><span class="fx-xsmall">Because of the faculty meeting, office hours move from Wednesday to Thursday, 3pm to 4pm, in the same room. Problem set 8 questions are welcome.</span> </span></div>
+                    <div><a class="fx-link" href="/courses/102/discussion_topics/32901"><span class="fx-small">Read more</span></a></div>
+                  </div>
+                </div>
+              </li>
+              <li class="fx-li">
+                <div class="fx-ann" role="group" aria-label="Safety goggles are required" data-testid="announcement-item-34901">
+                  <div class="fx-col fx-gap-xxx">
+                    <div class="fx-row fx-gap-xs">
+                      <span class="fx-avatar" aria-hidden="true">SW</span>
+                      <div class="fx-grow fx-min0 fx-col fx-gap-xxx">
+                        <div class="fx-row fx-between fx-gap-s">
+                          <span class="fx-bold fx-small"><span class="fx-xsmall">Safety goggles are required</span></span>
+                          <button type="button" class="fx-iconbtn" aria-pressed="false" data-testid="mark-read-34901"><span class="fx-sr">Mark Safety goggles are required as read</span><svg viewBox="0 0 1920 1920" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M960 0c530.4 0 960 429.6 960 960s-429.6 960-960 960S0 1490.4 0 960 429.6 0 960 0Zm0 120C496 120 120 496 120 960s376 840 840 840 840-376 840-840S1424 120 960 120Z" fill-rule="evenodd"/></svg></button>
+                        </div>
+                        <span class="fx-xsmall fx-secondary">Sent by Sam Whitaker | Oct 26, 2026</span>
+                        <span class="fx-xsmall fx-secondary" data-testid="course-name-34901">CHEM 120: General Chemistry</span>
+                      </div>
+                    </div>
+                    <div><span class="fx-xsmall"><span class="fx-xsmall">Everyone needs splash goggles for Lab 7. The stockroom lends them for the session if you forget yours, but it has only twenty pairs.</span> </span></div>
+                    <div><a class="fx-link" href="/courses/104/discussion_topics/34901"><span class="fx-small">Read more</span></a></div>
+                  </div>
+                </div>
+              </li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="fx-pager" data-testid="pagination-container">
+                <nav aria-label="Announcements pagination"><span class="fx-page fx-page-on">1</span><span class="fx-page">2</span></nav>
+              </div>
+            </div>
+          </section>
         </div>
         <div data-testid="widget-container-people-widget" class="fixture-widget">
           <h2>People</h2>
-          <ul><li>Dr. Maya Okafor &bull; Teacher</li></ul>
+          <ul>
+            <li>Dr. Maya Okafor &bull; Teacher</li>
+            <li>Prof. Ines Duarte &bull; Teacher</li>
+            <li>Sam Whitaker &bull; Teaching assistant</li>
+          </ul>
+        </div>
+        <div data-testid="widget-container-inbox-widget" class="fixture-widget">
+          <h2>Inbox</h2>
+          <ul>
+            <li>Dr. Maya Okafor &bull; Lab report feedback</li>
+            <li>Registrar &bull; Spring registration opens</li>
+            <li>Sam Whitaker &bull; Re: Office hours</li>
+            <li>Library &bull; Course reserve is ready</li>
+          </ul>
+        </div>
+        <div data-testid="widget-container-calendar-widget" class="fixture-widget">
+          <h2>Calendar</h2>
+          <ul>
+            <li>Mon &bull; Lab section 2pm</li>
+            <li>Tue &bull; Lecture 10am</li>
+            <li>Wed &bull; Study group 4pm</li>
+            <li>Thu &bull; Lab section 2pm</li>
+            <li>Fri &bull; Debate 11am</li>
+          </ul>
+        </div>
+        <div data-testid="widget-container-office-hours-widget" class="fixture-widget">
+          <h2>Office hours</h2>
+          <ul>
+            <li>Mon &bull; Dr. Okafor, 1pm to 2pm</li>
+            <li>Tue &bull; Prof. Duarte, 3pm to 4pm</li>
+            <li>Wed &bull; Sam Whitaker, 11am to 12pm</li>
+            <li>Thu &bull; Dr. Okafor, 1pm to 2pm</li>
+            <li>Fri &bull; Prof. Duarte, 10am to 11am</li>
+          </ul>
+        </div>
+        <div data-testid="widget-container-bookmarks-widget" class="fixture-widget">
+          <h2>Bookmarks</h2>
+          <ul>
+            <li><a href="/courses/101/pages/p0">Syllabus</a></li>
+            <li><a href="/courses/101/pages/p1">Lab safety rules</a></li>
+            <li><a href="/courses/101/pages/p2">Grading policy</a></li>
+            <li><a href="/courses/101/pages/p3">Late work policy</a></li>
+            <li><a href="/courses/101/pages/p4">Citation guide</a></li>
+            <li><a href="/courses/101/pages/p5">Study tips</a></li>
+          </ul>
         </div>
       </div>
+    </div>
     </div>
   </div>
 </div>
 </template>
-
-  <script>
-    // Canvas fills parts of the page after load: jQuery replaces the contents of #right-side
-    // with the /dashboard-sidebar HTML, and React renders into empty containers. This replays
-    // those steps from the template[data-fixture-step] elements, in order, then sets
-    // html[data-fixture-ready]. Add ?fixture_delay_ms=0 to the URL to skip the pauses.
-    (function () {
-      var delay = Number(new URLSearchParams(location.search).get('fixture_delay_ms') || '50');
-      var steps = Array.prototype.slice.call(document.querySelectorAll('template[data-fixture-step]'));
-      function run(index) {
-        if (index >= steps.length) {
-          document.documentElement.setAttribute('data-fixture-ready', 'true');
-          return;
-        }
-        var step = steps[index];
-        var target = document.querySelector(step.getAttribute('data-target'));
-        if (target) target.innerHTML = step.innerHTML;
-        setTimeout(function () { run(index + 1); }, delay);
-      }
-      function start() { setTimeout(function () { run(0); }, delay); }
-      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
-      else start();
-    })();
-  </script>
-</body>
-</html>

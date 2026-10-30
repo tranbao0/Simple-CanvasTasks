@@ -214,10 +214,7 @@ test.describe('undo', () => {
 });
 
 test.describe('in-page list', () => {
-  test('lives in a shadow root and shows the first 3 rows of a long group', async ({
-    context,
-    page,
-  }) => {
+  test('lives in a shadow root and shows every row of a long group', async ({ context, page }) => {
     const scenario = buildScenario(SCENARIO_NOW);
     const canvas = await serveFakeCanvas(context, [
       { path: '/', page: 'dashboard-card-view' },
@@ -229,18 +226,13 @@ test.describe('in-page list', () => {
     const host = page.locator('#weekrow-inpage > weekrow-list');
     await expect(host).toHaveAttribute('data-theme', 'light');
     expect(await host.evaluate((element) => element.shadowRoot?.mode)).toBe('open');
+    // Past due and Tomorrow show every row, with no summary line and no "Show more" link.
     const pastDue = host.locator('section[data-group="past_due"]');
-    await expect(pastDue.locator('.wr-sublist')).toHaveCount(0);
-    const rows = pastDue.locator(':scope > div > div > ul > li');
-    await expect(rows).toHaveCount(3);
-    const more = pastDue.getByRole('button', { name: /^Show \d+ more$/ });
-    const hidden = Number((await more.textContent())?.match(/\d+/)?.[0]);
-
-    await more.click();
-
-    await expect(rows).toHaveCount(3 + hidden);
-    await expect(more).toHaveCount(0);
-    await expect(rows.nth(3).locator('[data-part="title"]')).toBeFocused();
+    await expect(pastDue.getByRole('button', { name: /\d+ past due/ })).toHaveCount(0);
+    await expect(pastDue.locator(':scope > div > ul > li').first()).toBeVisible();
+    const tomorrow = host.locator('section[data-group="tomorrow"]');
+    await expect(tomorrow.locator(':scope > div > ul > li')).toHaveCount(6);
+    await expect(tomorrow.getByRole('button', { name: /^Show \d+ more$/ })).toHaveCount(0);
   });
 
   test('leaves the course name out of the rows on a course home page', async ({
@@ -284,12 +276,17 @@ test.describe('in-page list', () => {
       'display',
       'none',
     );
-    await expect(page.locator('#right-side .coming_up')).toBeVisible();
+    // The rest of the sidebar stays, such as Recent Feedback.
+    await expect(page.locator('#right-side .recent_feedback')).toBeVisible();
     expect(canvas.blocked).toEqual([]);
   });
 
   for (const fixture of ['dashboard-widgets', 'dashboard-list-view']) {
-    test(`adds nothing to ${fixture}`, async ({ context, page, serviceWorker }) => {
+    test(`puts the list in the page content of ${fixture}, and leaves Canvas's right column off`, async ({
+      context,
+      page,
+      serviceWorker,
+    }) => {
       const scenario = buildScenario(SCENARIO_NOW);
       const canvas = await serveFakeCanvas(context, [
         { path: '/', page: fixture },
@@ -298,16 +295,16 @@ test.describe('in-page list', () => {
 
       await openCanvasPage(page, canvas);
 
-      // The content script ran on this page: it saved the address and the list data loaded.
-      await expect.poll(() => savedAddress(serviceWorker)).toBe(canvas.origin);
-      await expect
-        .poll(() =>
-          canvas.requests.some((request) => request.path.startsWith('/api/v1/planner/items')),
-        )
-        .toBe(true);
-      await expect(page.locator('#weekrow-inpage')).toHaveCount(0);
-      await expect(page.locator('weekrow-list')).toHaveCount(0);
-      await expect(page.locator('#weekrow-hide-native-todo')).toHaveCount(0);
+      const list = page.locator('#weekrow-inpage');
+      await expect(list.getByRole('checkbox', { name: `Done: ${QUIZ_3}` })).toBeVisible();
+      expect(await savedAddress(serviceWorker)).toBe(canvas.origin);
+      await expect(page.locator('#right-side-wrapper #weekrow-inpage')).toHaveCount(0);
+      await expect(
+        page.locator('#content #weekrow-inpage, #content-wrapper > #weekrow-inpage'),
+      ).toHaveCount(1);
+      await expect(page.locator('body')).not.toHaveClass(/\bwith-right-side\b/);
+      await expect(page.locator('#right-side-wrapper')).toBeHidden();
+      expect(canvas.blocked).toEqual([]);
     });
   }
 });

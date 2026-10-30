@@ -1,0 +1,1750 @@
+/*
+ * List stylesheet, for extension pages and the in-page shadow root. Rules that only
+ * extension pages use live in pages.css.
+ *
+ * The list looks like a part of Canvas (design decision 21): Canvas's font, its brand custom
+ * properties with Canvas's defaults as fallbacks, the right-column heading and line, InstUI
+ * rows, pills, buttons, check boxes and toggles. Custom properties cross the shadow boundary, so
+ * the in-page list reads the school's brand colors from the Canvas page.
+ *
+ * Theme: data-theme="light" or "dark" on the list root or on an ancestor of it sets it.
+ * With no data-theme, the colors follow prefers-color-scheme. Dark values come from Canvas's
+ * dark widget dashboard; borders that must stand out use #6a7883 for 3:1 contrast.
+ *
+ * Units are px, because rem follows the font size of the host page.
+ */
+
+:host {
+  display: block;
+}
+
+.wr {
+  color-scheme: light dark;
+  container: wr / inline-size;
+  position: relative;
+
+  --wr-text: light-dark(var(--ic-brand-font-color-dark, #273540), #fff);
+  --wr-text-2: light-dark(#586874, #9ea6ad);
+  --wr-link: light-dark(var(--ic-link-color, #0e68b3), #5a9fd4);
+  --wr-link-hover: light-dark(var(--ic-link-color-darkened-10, #0d5ea2), #8cbde6);
+  --wr-brand: light-dark(var(--ic-brand-primary, #2b7abc), #4798e3);
+  --wr-primary: light-dark(
+    var(--ic-brand-button--primary-bgd, var(--ic-brand-primary, #2b7abc)),
+    #5a9fd4
+  );
+  --wr-on-primary: light-dark(var(--ic-brand-button--primary-text, #fff), #10141a);
+  --wr-bg: light-dark(#fff, #1b2330);
+  --wr-hover: light-dark(#f2f4f4, #253443);
+  --wr-line: light-dark(#e8eaec, #2e3e4e);
+  --wr-stroke: light-dark(#8d959f, #6a7883);
+  --wr-btn-line: light-dark(#d7dade, #4a5b68);
+  --wr-pill: light-dark(#6a7883, #9ea6ad);
+  --wr-danger: light-dark(#e62429, #f08a8d);
+  --wr-error: light-dark(#c71f23, #f08a8d);
+  --wr-on: light-dark(#03893d, #6fcf8a);
+  --wr-selected: light-dark(#e0ebf5, #253443);
+
+  margin: 0;
+  background: var(--wr-bg);
+  color: var(--wr-text);
+  font:
+    400 14px/1.3 'Lato Extended',
+    Lato,
+    'Helvetica Neue',
+    Helvetica,
+    Arial,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+[data-theme='dark'] .wr {
+  color-scheme: dark;
+}
+
+[data-theme='light'] .wr {
+  color-scheme: light;
+}
+
+/* The heading of the in-page list lines up with Canvas's own To Do heading. */
+.wr[data-surface='inpage'] {
+  padding: 17px 0 6px;
+}
+
+/* A dark list on a Canvas page gets a little room around its text. */
+:host([data-theme='dark']) .wr[data-surface='inpage'] {
+  margin: 5px -12px 0;
+  padding: 12px;
+  border-radius: 4px;
+}
+
+/*
+ * A panel is the list as a card beside the widgets of the widget dashboard. The layout code sets
+ * data-panel on the host (src/features/weekly-list/inpage/layout.ts). The card has the look of a
+ * Canvas widget: no border, the widget shadow, theme corners, 24px of padding, and a bold heading.
+ * A docked list in the narrow right column of the classic dashboard has less padding.
+ *
+ * The card scrolls inside when it is taller than --wr-panel-max-height. Its header stays in view.
+ * Where the card floats (float and dock), the host fills the tall container that the layout
+ * sets, so that the card can stick to the top of the viewport inside it.
+ */
+:host([data-panel]) {
+  --wr-pad-x: 24px;
+  --wr-pad-y: 24px;
+}
+
+:host([data-panel='dock']) {
+  --wr-pad-x: 16px;
+  --wr-pad-y: 16px;
+}
+
+:host(:is([data-panel='float'], [data-panel='dock'])) {
+  height: 100% !important;
+  /* The host is as tall as the page area, so only the card takes clicks. */
+  pointer-events: none !important;
+}
+
+:host(:is([data-panel='float'], [data-panel='dock'])) .wr-mount {
+  height: 100%;
+}
+
+:host([data-panel]) .wr[data-surface='inpage'],
+:host([data-panel][data-theme='dark']) .wr[data-surface='inpage'] {
+  /*
+   * The surface and the line of a widget card: the dark card is lighter than the page. The card
+   * has no border and the shadow of a widget, as in the widget package (TemplateWidget: a View
+   * with shadow="above", borderRadius="large" and background="primary"). The buttons keep the
+   * line color of the widget.
+   */
+  --wr-bg: light-dark(#fff, #1f2d3d);
+  --wr-btn-line: light-dark(#d7dade, #2e3e4e);
+  pointer-events: auto;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 var(--wr-pad-x) var(--wr-pad-y);
+  border: 0;
+  border-radius: 8px;
+  box-shadow:
+    0 0.1875rem 0.375rem rgba(0, 0, 0, 0.1),
+    0 0.1875rem 0.375rem rgba(0, 0, 0, 0.15);
+}
+
+/*
+ * The list has a height limit, in a card and in the right column of the classic dashboard: the
+ * window height minus 48px, at most 760px and at least 420px. A list with less content is as tall
+ * as its content. The header and the rings stay at the top, and
+ * the groups scroll in .wr-scroll. A view without that region, such as the settings, scrolls the
+ * whole card.
+ */
+.wr[data-surface='inpage'] {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  max-height: max(420px, min(100vh - 48px, 760px));
+  overflow: hidden auto;
+}
+
+.wr[data-surface='inpage'] > * {
+  flex: none;
+}
+
+.wr[data-surface='inpage'] > .wr-scroll {
+  flex: 1 1 auto;
+  /* In a low window the list keeps room for about one row, and the whole card scrolls instead. */
+  min-height: 128px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.wr-scroll:focus-visible {
+  outline-offset: -2px;
+}
+
+:host(:is([data-panel='float'], [data-panel='dock'])) .wr[data-surface='inpage'] {
+  position: sticky;
+  top: var(--wr-panel-top, 24px);
+}
+
+/* The minimized list: one header row high, with the look of a widget card. */
+.wr[data-surface='inpage'][data-minimized],
+:host([data-panel]) .wr[data-surface='inpage'][data-minimized] {
+  padding: 0;
+  overflow: hidden;
+}
+
+.wr .wr-minbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 0 var(--wr-pad-x, 12px);
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--wr-text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.wr .wr-minbar:hover {
+  background: var(--wr-hover);
+}
+
+.wr-minbar:focus-visible {
+  outline-offset: -2px;
+}
+
+.wr-minbar-title {
+  font-size: 16px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.wr-minbar-status {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wr-text-2);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* In the bar the chevron points up: it opens the list above the bar's place. */
+.wr-minbar > .wr-chevron {
+  flex: none;
+  margin-inline-start: auto;
+  transform: rotate(180deg);
+}
+
+:host([data-panel]) .wr-header {
+  padding-top: var(--wr-pad-y);
+  background: var(--wr-bg);
+}
+
+/* In a card that scrolls inside, the header and the Undo notice stay in view. */
+:host(:is([data-panel='float'], [data-panel='dock'])) .wr-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+:host([data-panel]) .wr-head {
+  margin-bottom: 8px;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+:host([data-panel]) .wr-range {
+  font-size: 18px;
+}
+
+.wr *,
+.wr *::before,
+.wr *::after {
+  box-sizing: border-box;
+}
+
+.wr :where(h1, h2, h3, h4, p, ul, ol, li) {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.wr :where(ul, ol) {
+  list-style: none;
+}
+
+.wr :where(button) {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  text-align: inherit;
+  cursor: pointer;
+}
+
+.wr :where(button:disabled, [aria-disabled='true']) {
+  cursor: default;
+}
+
+.wr :focus-visible {
+  outline: 2px solid var(--wr-brand);
+  outline-offset: 2px;
+}
+
+/*
+ * The side panel header and the Undo dock are sticky. App keeps --wr-inset-top and
+ * --wr-inset-bottom at their heights, so the browser scrolls a focused control clear of them
+ * (WCAG 2.4.11). The sticky parts themselves need no margin: they never scroll away.
+ */
+.wr * {
+  scroll-margin-block: calc(var(--wr-inset-top, 0px) + 8px) calc(var(--wr-inset-bottom, 0px) + 8px);
+}
+
+.wr-header *,
+.wr-dock * {
+  scroll-margin-block: 0;
+}
+
+.wr-icon {
+  display: block;
+  flex: none;
+}
+
+.wr-flip {
+  transform: scaleX(-1);
+}
+
+.wr-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Buttons: InstUI ghost icon buttons, secondary and primary buttons, and links. */
+
+.wr-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  border-radius: 4px;
+  color: var(--wr-text);
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.wr-icon-btn > .wr-icon {
+  font-size: 16px;
+}
+
+.wr-icon-btn:hover:not(:disabled, [aria-disabled='true']) {
+  background: var(--wr-hover);
+}
+
+.wr-icon-btn:is(:disabled, [aria-disabled='true']) {
+  opacity: 0.5;
+}
+
+.wr-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 4px 12px;
+  border: 1px solid var(--wr-btn-line);
+  border-radius: 4px;
+  background: var(--wr-hover);
+  color: var(--wr-text);
+  font-size: 16px;
+  line-height: 1.125;
+  text-align: center;
+}
+
+.wr-btn:hover {
+  background: var(--wr-line);
+}
+
+.wr-btn-primary {
+  border-color: color-mix(in srgb, var(--wr-primary) 85%, #000);
+  background: var(--wr-primary);
+  color: var(--wr-on-primary);
+}
+
+.wr-btn-primary:hover {
+  background: color-mix(in srgb, var(--wr-primary) 88%, #000);
+}
+
+/* A button that is off for a moment, such as the accept button of an offer that just showed. */
+.wr-btn[aria-disabled='true'] {
+  opacity: 0.55;
+}
+
+.wr-btn[aria-disabled='true']:hover {
+  background: var(--wr-primary);
+}
+
+.wr-btn-small {
+  min-height: 28px;
+  padding: 2px 8px;
+  font-size: 14px;
+}
+
+.wr-link-btn,
+.wr-this-week,
+.wr-sub-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  color: var(--wr-link);
+  white-space: nowrap;
+}
+
+:is(.wr-link-btn, .wr-sub-toggle, .wr-title, .wr-this-week):hover:not([aria-disabled='true']) {
+  color: var(--wr-link-hover);
+  text-decoration: underline;
+}
+
+/* A host name stays on one line when it fits, so a line never ends in the middle of it. */
+.wr-host {
+  display: inline-block;
+  max-width: 100%;
+  text-decoration: inherit;
+}
+
+/* Section heading, as Canvas's right-column "To Do" and "Recent Feedback" headings. */
+
+.wr-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--wr-line);
+}
+
+.wr-head > .wr-icon-btn {
+  margin-block: -2px;
+}
+
+.wr-head > .wr-icon-btn:last-of-type {
+  margin-right: -6px;
+}
+
+.wr-range {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 24px;
+  text-wrap: balance;
+}
+
+.wr-range:focus-visible {
+  outline-offset: -2px;
+}
+
+.wr-add .wr-btn-label {
+  display: none;
+}
+
+.wr-nav-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: -2px 0 4px;
+}
+
+.wr-nav {
+  display: flex;
+  align-items: center;
+  margin-left: -6px;
+}
+
+.wr-this-week {
+  min-height: 28px;
+  padding: 0 4px;
+}
+
+.wr-this-week[aria-disabled='true'] {
+  color: var(--wr-text-2);
+}
+
+/* The span control: a compact select, with the number field of a custom span beside it. */
+.wr-span,
+.wr-span-days {
+  display: flex;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.wr-span {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.wr-nav-row .wr-span {
+  display: contents;
+}
+
+.wr-span .wr-input {
+  height: 28px;
+  padding: 0 6px;
+  font-size: 14px;
+}
+
+.wr-span .wr-span-select {
+  field-sizing: content;
+  width: auto;
+  max-width: 100%;
+}
+
+.wr-span .wr-span-input {
+  width: 64px;
+}
+
+.wr-setting .wr-span .wr-input {
+  height: 38px;
+  padding: 0 10px;
+  font-size: 16px;
+}
+
+.wr-setting .wr-span .wr-span-select {
+  width: 100%;
+}
+
+.wr-span-input:invalid {
+  border-color: var(--wr-error);
+}
+
+.wr-tz {
+  margin-left: auto;
+  color: var(--wr-text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.wr-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.wr-progress::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: var(--wr-brand);
+  animation: wr-progress 1.1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes wr-progress {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+.wr-back {
+  color: var(--wr-link);
+}
+
+/* Notices */
+
+/* The notice queue shows one slim notice, with a quiet count of the ones that wait. */
+/* The live region stays displayed while it is empty, so a screen reader announces its first notice. */
+.wr-notices:not(:empty) {
+  margin-block: 6px;
+}
+
+.wr-notices:has(+ .wr-notices-more) {
+  margin-bottom: 0;
+}
+
+.wr-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 8px;
+  color: var(--wr-text-2);
+}
+
+/* A notice and an offer carry a brand bar, like an InstUI alert, and have no box. */
+.wr-notices > :first-child,
+.wr-offer {
+  padding-left: 9px;
+  border-left: 3px solid var(--wr-brand);
+}
+
+.wr-notices-more {
+  margin-block: 2px 6px;
+  padding-left: 12px;
+  color: var(--wr-text-2);
+  font-size: 12px;
+}
+
+.wr-offer {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+
+/* Progress chart */
+
+.wr-rings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.wr-chart {
+  position: relative;
+  flex: none;
+  align-self: center;
+  width: min(112px, 100%);
+  aspect-ratio: 1;
+}
+
+.wr-chart > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.wr-ring,
+.wr-legend-row {
+  --wr-arc: light-dark(var(--wr-course), color-mix(in srgb, var(--wr-course) 70%, #fff));
+}
+
+.wr-ring {
+  cursor: pointer;
+}
+
+.wr-chart:has([aria-pressed='true']) .wr-ring[aria-pressed='false'] {
+  opacity: 0.35;
+}
+
+.wr-ring-track {
+  stroke: light-dark(#e3e7ea, #2e3e4e);
+}
+
+.wr-ring-arc {
+  stroke: var(--wr-arc);
+  transition: stroke-dashoffset 0.45s ease;
+}
+
+.wr-chart-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.wr-chart-center > b {
+  font-size: 14px;
+  line-height: 16px;
+}
+
+.wr-chart-center > .wr-icon {
+  font-size: 16px;
+  color: var(--wr-on);
+}
+
+.wr-chart-center > span {
+  color: var(--wr-text-2);
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.wr-chart-more {
+  position: absolute;
+  inset: auto -15px -3px auto;
+}
+
+.wr-legend {
+  flex: 1;
+  min-width: 0;
+}
+
+.wr-legend-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 3px 1px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wr-legend-row:hover {
+  background: var(--wr-hover);
+}
+
+.wr-legend-row[aria-pressed='true'] {
+  background: var(--wr-selected);
+  box-shadow: inset 0 0 0 1px var(--wr-brand);
+}
+
+.wr-legend-row > i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--wr-arc);
+}
+
+.wr-legend-code {
+  overflow-wrap: anywhere;
+}
+
+.wr-legend-row > em,
+.wr-chart-more {
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--wr-text-2);
+  color: var(--wr-bg);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+  text-align: center;
+}
+
+.wr-filter {
+  margin-bottom: 2px;
+}
+
+/* Groups */
+
+.wr-group {
+  margin-top: 10px;
+}
+
+.wr-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  font-weight: 700;
+}
+
+.wr-group-date,
+.wr-count,
+.wr-warn {
+  color: var(--wr-text-2);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.wr-group-date {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wr-count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.wr-group-toggle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 24px;
+  font-weight: inherit;
+}
+
+.wr-group-toggle:hover .wr-group-name {
+  text-decoration: underline;
+}
+
+.wr-chevron {
+  font-size: 10px;
+}
+
+:is(.wr-group-toggle, .wr-sub-toggle)[aria-expanded='false'] > .wr-chevron {
+  transform: rotate(-90deg);
+}
+
+.wr-subline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 12px;
+  padding: 2px 0;
+}
+
+.wr-subline > .wr-link-btn {
+  margin-left: auto;
+}
+
+.wr-sublist {
+  margin-left: 9px;
+  padding-left: 10px;
+  border-left: 1px solid var(--wr-line);
+}
+
+.wr-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--wr-text-2);
+}
+
+/*
+ * Placeholders for days and rings that still load: light bars in the divider color, as Canvas
+ * draws loading blocks, with a slow pulse. A real row replaces them in the same place.
+ */
+
+.wr-group-loading > .wr-group-head > .wr-group-name {
+  color: var(--wr-text-2);
+}
+
+.wr-skel-row {
+  padding: 5px 0;
+}
+
+.wr-skel-bar {
+  display: block;
+  height: 36px;
+  border-radius: 4px;
+  background: var(--wr-line);
+  animation: wr-skel 1.4s ease-in-out infinite;
+}
+
+.wr-chart-loading .wr-ring-track {
+  animation: wr-skel 1.4s ease-in-out infinite;
+}
+
+@keyframes wr-skel {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Rows: check box, type icon in the course color, then title, course, due text and pills. */
+
+.wr-item {
+  display: grid;
+  grid-template-columns: 20px 16px minmax(0, 1fr);
+  column-gap: 9px;
+  align-items: start;
+  padding: 5px 0;
+}
+
+.wr-type {
+  margin-top: 1px;
+  color: light-dark(var(--wr-course), color-mix(in srgb, var(--wr-course) 65%, #fff));
+  font-size: 16px;
+}
+
+.wr-item-body {
+  min-width: 0;
+}
+
+.wr-title {
+  /* The padding makes the hit area 24 px high, and the margin keeps the row height. */
+  display: inline-block;
+  margin-block: -3px;
+  padding-block: 3px;
+  color: var(--wr-link);
+  line-height: 18px;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.wr-item:is(.is-done, .is-skipped) .wr-title {
+  color: var(--wr-text-2);
+}
+
+.wr-course {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--wr-text-2);
+  line-height: 16px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The due line: the due text on the left, the row actions on the right. */
+.wr-due {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 12px;
+  margin-top: 2px;
+  color: var(--wr-text-2);
+  line-height: 16px;
+}
+
+/* Parts of the info line, such as "Reply to topic | 11:59 pm". Each pipe sits in the gap before
+   its part. When the line wraps, the pipe before the first part of a line falls outside the box
+   and is clipped, so no line starts or ends with a pipe. */
+.wr-info {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 19px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.wr-info > * {
+  position: relative;
+}
+
+.wr-info > ::before {
+  content: '|' / '';
+  position: absolute;
+  right: 100%;
+  width: 19px;
+  text-align: center;
+}
+
+.wr-when {
+  font-variant-numeric: tabular-nums;
+}
+
+.wr-item-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.wr-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 12px;
+  margin-left: auto;
+}
+
+.wr-item-tip {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--wr-hover);
+}
+
+/* InstUI check box: 20 px, 1 px border, dark fill with a white check when checked. */
+
+.wr-check {
+  position: relative;
+  display: block;
+  width: 20px;
+  height: 20px;
+  margin-top: -1px;
+}
+
+.wr-check-input {
+  position: absolute;
+  inset: -2px;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.wr-check-input:disabled {
+  cursor: not-allowed;
+}
+
+.wr-check-box {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--wr-stroke);
+  border-radius: 4px;
+  background: var(--wr-bg);
+  color: transparent;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.wr-check-input:hover:not(:disabled) + .wr-check-box {
+  border-color: var(--wr-text);
+}
+
+.wr-check-input:checked + .wr-check-box {
+  border-color: var(--wr-text);
+  background: var(--wr-text);
+  color: var(--wr-bg);
+}
+
+.wr-check-input:focus-visible + .wr-check-box {
+  outline: 2px solid var(--wr-brand);
+  outline-offset: 3px;
+}
+
+.wr-check-input:disabled + .wr-check-box {
+  border-style: dashed;
+}
+
+/* InstUI pills: the default pill, and the danger pill for Missing. */
+
+.wr-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  max-width: 100%;
+  padding: 2px 8px;
+  border: 1px solid var(--wr-pill);
+  border-radius: 12px;
+  background: var(--wr-bg);
+  color: var(--wr-pill);
+  line-height: 18px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+/* A long chip, such as "Can't confirm: Gradescope" in a narrow panel, wraps instead of cutting
+   its text. */
+.wr-tag-text {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.wr-chip-missing {
+  border-color: var(--wr-danger);
+  color: var(--wr-danger);
+}
+
+button.wr-chip:hover,
+button.wr-chip[aria-expanded='true'] {
+  box-shadow: inset 0 0 0 1px currentColor;
+}
+
+.wr-chip > .wr-chevron {
+  font-size: 8px;
+}
+
+:is(.wr-chip, .wr-marker)[aria-expanded='true'] > .wr-chevron {
+  transform: rotate(180deg);
+}
+
+.wr-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  color: var(--wr-text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+button.wr-marker:hover {
+  color: var(--wr-text);
+}
+
+/* The footer line and the Undo notice, an InstUI alert. */
+
+.wr-foot {
+  margin-top: 10px;
+}
+
+.wr-dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  margin-top: auto;
+  padding-block: 8px;
+  pointer-events: none;
+}
+
+.wr-dock:empty {
+  padding-block: 0;
+}
+
+.wr-toast {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 40px;
+  padding: 4px 4px 4px 12px;
+  border: 2px solid var(--wr-brand);
+  border-radius: 4px;
+  background: var(--wr-bg);
+  box-shadow: 0 3px 6px rgb(0 0 0 / 26%);
+  pointer-events: auto;
+}
+
+.wr-toast-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.wr-toast-action {
+  padding: 0 6px;
+  font-weight: 700;
+}
+
+/* States without a list */
+
+.wr-state {
+  display: grid;
+  gap: 12px;
+  max-width: 440px;
+  padding-block: 6px 12px;
+}
+
+.wr-state-group {
+  display: grid;
+  gap: 12px;
+}
+
+.wr-state-title {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.wr-state-host {
+  font-weight: 700;
+  overflow-wrap: break-word;
+}
+
+.wr-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.wr-state-hint {
+  padding: 8px 12px;
+  border-radius: 4px;
+  background: var(--wr-hover);
+}
+
+.wr-checking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--wr-text-2);
+}
+
+.wr-spinner {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--wr-line);
+  border-top-color: var(--wr-brand);
+  border-radius: 50%;
+  animation: wr-spin 800ms linear infinite;
+}
+
+@keyframes wr-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Forms: InstUI text inputs and selects */
+
+.wr-form {
+  display: grid;
+  gap: 12px;
+  padding-bottom: 12px;
+}
+
+.wr-form > .wr-head {
+  margin-bottom: 0;
+}
+
+.wr-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.wr-field-row {
+  display: grid;
+  gap: 12px 8px;
+}
+
+.wr-label,
+.wr-setting-name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.wr-optional {
+  color: var(--wr-text-2);
+  font-weight: 400;
+}
+
+.wr-input {
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  margin: 0;
+  padding: 0 10px;
+  border: 1px solid var(--wr-stroke);
+  border-radius: 4px;
+  background: var(--wr-bg);
+  color: var(--wr-text);
+  font: inherit;
+  font-size: 16px;
+}
+
+textarea.wr-input {
+  height: auto;
+  min-height: 76px;
+  padding-block: 8px;
+  resize: vertical;
+}
+
+.wr-input[aria-invalid='true'] {
+  border-color: var(--wr-error);
+}
+
+.wr-hint,
+.wr-setting-help {
+  color: var(--wr-text-2);
+}
+
+/* The support line sits last and stays quiet. */
+.wr-support {
+  margin-top: 24px;
+  color: var(--wr-text-2);
+  font-size: 0.875em;
+}
+
+.wr-support a {
+  color: var(--wr-link);
+}
+
+.wr-support a:hover {
+  color: var(--wr-link-hover);
+}
+
+/* Short help lines break into even lines, so no line ends with one word alone. */
+.wr-setting-help {
+  text-wrap: balance;
+}
+
+.wr-error {
+  color: var(--wr-error);
+}
+
+.wr-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.wr-form-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* Settings */
+
+.wr-setting {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding-block: 12px;
+  border-bottom: 1px solid var(--wr-line);
+}
+
+.wr-settings-panel .wr-setting:first-child {
+  padding-top: 6px;
+}
+
+.wr-setting-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+}
+
+.wr-setting-row > .wr-setting-help {
+  grid-column: 1 / -1;
+}
+
+.wr-course-list > li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 36px;
+  padding-block: 4px;
+}
+
+.wr-course-list > li + li {
+  border-top: 1px solid var(--wr-line);
+}
+
+.wr-course-list label {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+input:focus-visible + .wr-switch-track {
+  outline: 2px solid var(--wr-brand);
+  outline-offset: 2px;
+}
+
+/* InstUI toggle: a gray track that turns green, with a knob that shows an x or a check. */
+
+.wr-switch {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 42px;
+  height: 28px;
+}
+
+.wr-switch > input {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.wr-switch-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--wr-hover);
+  box-shadow: inset 0 0 0 1px var(--wr-stroke);
+}
+
+.wr-switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid #586874;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 20%);
+  color: #273540;
+  font-size: 10px;
+}
+
+input:checked + .wr-switch-track {
+  background: var(--wr-on);
+  box-shadow: none;
+}
+
+input:checked + .wr-switch-track > .wr-switch-knob {
+  border-color: #027634;
+  color: #027634;
+  transform: translateX(14px);
+}
+
+/* The Tasks and Announcements tabs: text tabs on a line, the chosen one marked by a bar. */
+
+.wr-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0 4px;
+  margin: 2px 0 4px;
+  border-bottom: 1px solid var(--wr-line);
+}
+
+.wr-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  margin-bottom: -1px;
+  padding: 0 8px;
+  border-bottom: 3px solid transparent;
+  color: var(--wr-text-2);
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.wr-tab-compact {
+  display: none;
+}
+
+.wr-tab:hover {
+  border-bottom-color: var(--wr-btn-line);
+  color: var(--wr-text);
+}
+
+.wr-tab[aria-selected='true'] {
+  border-bottom-color: var(--wr-brand);
+  color: var(--wr-text);
+}
+
+.wr-tab:focus-visible {
+  outline-offset: -3px;
+}
+
+.wr-tab-badge {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--wr-primary);
+  color: var(--wr-on-primary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+}
+
+/* The Announcements tab: a bar with the Show read switch, then one row for each announcement. */
+
+.wr-ann-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+  color: var(--wr-text-2);
+}
+
+.wr-ann-bar .wr-switch {
+  transform: scale(0.85);
+  transform-origin: right center;
+}
+
+.wr-ann {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--wr-line);
+}
+
+.wr-ann:last-child {
+  border-bottom: 0;
+}
+
+.wr-ann-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--wr-text-2);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.wr-ann-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: light-dark(var(--wr-course), color-mix(in srgb, var(--wr-course) 65%, #fff));
+}
+
+.wr-ann-course {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wr-ann-when {
+  margin-inline-start: auto;
+  white-space: nowrap;
+}
+
+.wr-ann-title {
+  display: block;
+  width: 100%;
+  margin-block: 1px;
+  padding-block: 3px;
+  color: var(--wr-link);
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.wr-ann-title:hover {
+  color: var(--wr-link-hover);
+  text-decoration: underline;
+}
+
+.wr-ann.is-unread .wr-ann-title {
+  font-weight: 700;
+}
+
+.wr-ann-author {
+  color: var(--wr-text-2);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.wr-ann-snippet {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--wr-text-2);
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.wr-ann-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 12px;
+}
+
+.wr-ann-actions:not(:empty) {
+  margin-top: 4px;
+}
+
+.wr-ann-read {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  color: var(--wr-link);
+  white-space: nowrap;
+}
+
+.wr-ann-read:hover {
+  color: var(--wr-link-hover);
+  text-decoration: underline;
+}
+
+.wr-ann-circle {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--wr-stroke);
+  border-radius: 50%;
+  background: var(--wr-bg);
+  color: transparent;
+  font-size: 8px;
+}
+
+.wr-ann-read:hover .wr-ann-circle {
+  border-color: var(--wr-text);
+  color: var(--wr-text);
+}
+
+.wr-ann-note {
+  margin-top: 4px;
+  color: var(--wr-text-2);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+/* The message of a teacher, after the sanitizer: only these tags and no style of its own. */
+
+.wr-ann-body {
+  margin-top: 4px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.wr-ann-body :where(p, ul, ol, blockquote, pre, table, h1, h2, h3, h4, h5, h6) {
+  margin: 0 0 8px;
+}
+
+.wr-ann-body :where(ul, ol) {
+  padding-inline-start: 20px;
+}
+
+.wr-ann-body ul {
+  list-style: disc;
+}
+
+.wr-ann-body ol {
+  list-style: decimal;
+}
+
+.wr-ann-body :where(h1, h2, h3, h4, h5, h6) {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.wr-ann-body blockquote {
+  padding-inline-start: 10px;
+  border-inline-start: 3px solid var(--wr-line);
+}
+
+.wr-ann-body a {
+  color: var(--wr-link);
+  text-decoration: underline;
+}
+
+.wr-ann-body img {
+  max-width: 100%;
+  height: auto;
+}
+
+.wr-ann-body :where(table, pre) {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.wr-ann-body :where(th, td) {
+  padding: 2px 6px;
+  border: 1px solid var(--wr-line);
+}
+
+.wr-ann-body :where(code, pre) {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+
+.wr-skel-tall {
+  height: 64px;
+}
+
+/* Medium widths */
+
+@container wr (width >= 320px) {
+  .wr-add .wr-btn-label {
+    display: inline;
+  }
+
+  .wr-field-row {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* The legend sits beside the chart only where course codes fit in full. */
+
+@container wr (width >= 280px) {
+  .wr-rings {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .wr-chart {
+    margin-right: 15px;
+  }
+}
+
+/* Below 360 px the time zone note takes its own line, at the left edge like the rows above. */
+
+@container wr (width < 360px) {
+  .wr-tz {
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+}
+
+/* Compact layout below 240 px: smaller buttons and no type icon, as Canvas's planner. */
+
+@container wr (width < 240px) {
+  .wr-icon-btn {
+    min-width: 24px;
+    height: 24px;
+    padding: 0 4px;
+  }
+
+  .wr-head > .wr-icon-btn {
+    margin-block: 0;
+  }
+
+  .wr-head > .wr-icon-btn:last-of-type {
+    margin-right: -4px;
+  }
+
+  .wr-nav {
+    margin-left: -4px;
+  }
+
+  .wr-item {
+    grid-template-columns: 20px minmax(0, 1fr);
+    column-gap: 8px;
+  }
+
+  .wr-item > .wr-type {
+    display: none;
+  }
+
+  .wr-sublist {
+    margin-left: 4px;
+    padding-left: 6px;
+  }
+
+  .wr-tab[data-part='tab-announcements'] .wr-tab-label {
+    display: none;
+  }
+
+  .wr-tab-compact {
+    display: inline;
+  }
+
+  .wr-tab {
+    min-height: 32px;
+    padding: 0 6px;
+  }
+
+  .wr-form-actions .wr-btn {
+    flex: 1 1 auto;
+  }
+}
+
+/* With reduced motion, the progress bar stands still and the spinner shows a still arc. */
+@media (prefers-reduced-motion: reduce) {
+  .wr-progress::before {
+    width: 100%;
+    opacity: 0.6;
+    animation: none;
+  }
+
+  .wr-spinner {
+    animation: none;
+  }
+
+  .wr-skel-bar,
+  .wr-chart-loading .wr-ring-track {
+    animation: none;
+  }
+
+  .wr-ring-arc {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .wr-check-input:checked + .wr-check-box,
+  input:checked + .wr-switch-track {
+    background: Highlight;
+    border-color: Highlight;
+    color: HighlightText;
+  }
+
+  .wr-legend-row[aria-pressed='true'] {
+    outline: 2px solid Highlight;
+  }
+
+  .wr-skel-bar {
+    border: 1px solid GrayText;
+  }
+}
